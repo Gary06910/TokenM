@@ -1,0 +1,25 @@
+{
+  "name": "Token M",
+  "short_name": "Token M",
+  "description": "Private Codex completion notifications from your Token M desktop.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080d18",
+  "theme_color": "#101828",
+  "icons": [
+    {
+      "src": "/icons/token-m.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/token-m-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Token M">
+  <rect width="512" height="512" fill="#101828"/>
+  <circle cx="256" cy="256" r="205" fill="#6172f3"/>
+  <path fill="#fff" d="M130 151h62l64 108 64-108h62v210h-58V245l-51 84h-34l-51-84v116h-58z"/>
+</svg>
