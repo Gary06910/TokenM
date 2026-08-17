@@ -221,6 +221,8 @@ return class TenantDO {
       if (url.pathname === '/v1/desktop/enroll') return await this.enroll(request, tenantId);
       if (url.pathname === '/v1/pairings/redeem') return await this.redeem(request, tenantId);
       if (url.pathname === '/v1/desktop/status') return await this.desktopStatus(request, tenantId);
+      if (url.pathname === '/v1/desktop/test') return await this.desktopTestPush(request);
+      if (url.pathname.startsWith('/v1/desktop/mobile/')) return await this.desktopDeleteMobile(request, url.pathname.slice('/v1/desktop/mobile/'.length));
       if (url.pathname === '/v1/pairings') return await this.createPairing(request);
       if (url.pathname === '/v1/events') return await this.receiveEvent(request);
       if (url.pathname === '/v1/mobile/status') return await this.mobileStatus(request);
@@ -272,6 +274,37 @@ return class TenantDO {
     const expiresAtMs = this.now() + PAIR_TTL_MS;
     await this.state.storage.put(`pair:${challengeId}`, { tokenMac: await hmac(this.pepper, capability), deviceId: auth.parsed.subjectId, expiresAtMs, usedAt: null });
     return managedResponse(201, { pairingUrl: `${new URL(request.url).origin}/pair#token=${capability}`, expiresAt: new Date(expiresAtMs).toISOString() }, request);
+  }
+
+  async desktopTestPush(request) {
+    if (request.method !== 'POST') return errorResponse(405, 'method_not_allowed', 'Method not allowed', request);
+    const auth = await this.authenticate(request, 'desktop');
+    if (!auth) return errorResponse(401, 'unauthorized', 'Desktop credential is invalid', request);
+    if (!await this.rateLimit(`desktop:${auth.parsed.subjectId}`, 120)) return errorResponse(429, 'rate_limited', 'Too many requests', request);
+    const body = await readJson(request, 1024);
+    requireExactKeys(body, []);
+    const eventId = `evt_test_${randomSecret().slice(0, 22)}`;
+    const mobiles = await this.state.storage.list({ prefix: 'mobile:' });
+    const stored = { event: { eventId, type: 'token-m.test' }, expiresAtMs: this.now() + EVENT_TTL_MS, deliveries: {} };
+    for (const [key, mobile] of mobiles) {
+      if (!mobile.revokedAt && mobile.subscription) stored.deliveries[key.slice(7)] = { state: 'pending', attempts: 0 };
+    }
+    const eventKey = `event:${eventId}`;
+    await this.state.storage.put(eventKey, stored);
+    const counts = await this.deliver(stored, eventKey, { eventId, title: 'Token M', body: 'Token M notifications are working', url: '/', tag: eventId });
+    if (counts.pending) return errorResponse(503, 'push_retry_required', 'Push delivery must be retried', request, { eventId, delivered: counts.delivered, expired: counts.expired, pending: counts.pending });
+    if (counts.terminal) return errorResponse(422, 'invalid_subscription', 'A push provider rejected an installation subscription', request, { eventId, delivered: counts.delivered, expired: counts.expired, terminal: counts.terminal });
+    return managedResponse(200, { ok: true, eventId, delivered: counts.delivered, expired: counts.expired }, request);
+  }
+
+  async desktopDeleteMobile(request, installationId) {
+    if (request.method !== 'DELETE') return errorResponse(405, 'method_not_allowed', 'Method not allowed', request);
+    const auth = await this.authenticate(request, 'desktop');
+    if (!auth) return errorResponse(401, 'unauthorized', 'Desktop credential is invalid', request);
+    if (!/^mob_[A-Za-z0-9_-]{22}$/.test(installationId)) return errorResponse(400, 'invalid_installation_id', 'Mobile installation id is invalid', request);
+    if (!await this.rateLimit(`desktop:${auth.parsed.subjectId}`, 120)) return errorResponse(429, 'rate_limited', 'Too many requests', request);
+    await this.state.storage.delete(`mobile:${installationId}`);
+    return managedResponse(200, { ok: true }, request);
   }
 
   async redeem(request, tenantId) {

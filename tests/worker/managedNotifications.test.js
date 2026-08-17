@@ -48,30 +48,34 @@ function jsonRequest(pathname, { method = 'POST', body, bearer, headers = {} } =
   });
 }
 
-async function setup() {
+async function setup({ tenantId = 'AAAAAAAAAAAAAAAAAAAAAA', deviceName = 'DESKTOP-A' } = {}) {
   const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
   const state = fakeState();
   const tenant = new worker.TenantDO(state, ENV);
   let clock = Date.parse('2026-08-17T10:00:00.000Z');
   tenant.now = () => clock;
+  const request = (pathname, options = {}) => jsonRequest(pathname, {
+    ...options,
+    headers: { ...options.headers, 'x-token-m-tenant-id': tenantId }
+  });
   const tenantHeader = { 'x-token-m-enrollment-secret': ENV.TOKEN_M_ENROLLMENT_SECRET };
-  const enrolledResponse = await tenant.fetch(jsonRequest('/v1/desktop/enroll', { body: { deviceName: 'DESKTOP-A' }, headers: tenantHeader }));
+  const enrolledResponse = await tenant.fetch(request('/v1/desktop/enroll', { body: { deviceName }, headers: tenantHeader }));
   assert.equal(enrolledResponse.status, 201);
   const enrolled = await enrolledResponse.json();
-  return { worker, state, tenant, enrolled, setClock(value) { clock = value; }, getClock() { return clock; } };
+  return { worker, state, tenant, enrolled, request, setClock(value) { clock = value; }, getClock() { return clock; } };
 }
 
 async function pairMobile(context, name = 'iPhone') {
-  const pairingResponse = await context.tenant.fetch(jsonRequest('/v1/pairings', { bearer: context.enrolled.credential, body: { deviceName: 'DESKTOP-A' } }));
+  const pairingResponse = await context.tenant.fetch(context.request('/v1/pairings', { bearer: context.enrolled.credential, body: { deviceName: context.enrolled.device.name } }));
   assert.equal(pairingResponse.status, 201);
   const token = new URL((await pairingResponse.json()).pairingUrl).hash.slice('#token='.length);
-  const redeemResponse = await context.tenant.fetch(jsonRequest('/v1/pairings/redeem', { body: { token, installationName: name } }));
+  const redeemResponse = await context.tenant.fetch(context.request('/v1/pairings/redeem', { body: { token, installationName: name } }));
   assert.equal(redeemResponse.status, 201);
   return { token, mobile: await redeemResponse.json() };
 }
 
 async function subscribe(context, mobile) {
-  const response = await context.tenant.fetch(jsonRequest('/v1/mobile/subscription', {
+  const response = await context.tenant.fetch(context.request('/v1/mobile/subscription', {
     method: 'PUT', bearer: mobile.credential, body: {
       permission: 'granted',
       subscription: {
@@ -227,6 +231,66 @@ test('test push targets the caller and DELETE revokes its credential', async () 
   assert.equal(calls, 1);
   assert.equal((await context.tenant.fetch(jsonRequest('/v1/mobile', { method: 'DELETE', bearer: mobile.credential }))).status, 200);
   assert.equal((await context.tenant.fetch(jsonRequest('/v1/mobile/status', { method: 'GET', bearer: mobile.credential }))).status, 401);
+});
+
+test('desktop test push reaches every active subscribed mobile with fixed privacy-safe content', async () => {
+  const context = await setup();
+  const first = (await pairMobile(context, 'Phone 1')).mobile;
+  const second = (await pairMobile(context, 'Phone 2')).mobile;
+  await subscribe(context, first);
+  await subscribe(context, second);
+  const pushes = [];
+  context.tenant.push = async (subscription, message) => {
+    pushes.push({ endpoint: subscription.endpoint, message });
+    return { classification: 'delivered', status: 201 };
+  };
+
+  const response = await context.tenant.fetch(context.request('/v1/desktop/test', { bearer: context.enrolled.credential, body: {} }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).delivered, 2);
+  assert.equal(pushes.length, 2);
+  for (const push of pushes) {
+    assert.equal(push.message.title, 'Token M');
+    assert.equal(push.message.body, 'Token M notifications are working');
+    assert.doesNotMatch(JSON.stringify(push.message), /prompt|assistant|transcript/i);
+  }
+
+  const custom = await context.tenant.fetch(context.request('/v1/desktop/test', {
+    bearer: context.enrolled.credential,
+    body: { body: 'Attacker-controlled notification' }
+  }));
+  assert.equal(custom.status, 400);
+  assert.equal(pushes.length, 2, 'rejected custom content must never reach push delivery');
+  assert.equal((await context.tenant.fetch(context.request('/v1/desktop/test', { bearer: first.credential, body: {} }))).status, 401);
+});
+
+test('desktop mobile deletion validates auth and ids while remaining idempotent', async () => {
+  const context = await setup();
+  const { mobile } = await pairMobile(context);
+  const installationId = mobile.installation.installationId;
+  const path = `/v1/desktop/mobile/${installationId}`;
+
+  assert.equal((await context.tenant.fetch(context.request(path, { method: 'DELETE', bearer: mobile.credential }))).status, 401);
+  assert.equal((await context.tenant.fetch(context.request('/v1/desktop/mobile/not-a-mobile-id', { method: 'DELETE', bearer: context.enrolled.credential }))).status, 400);
+  assert.equal((await context.tenant.fetch(context.request(path, { method: 'DELETE', bearer: context.enrolled.credential }))).status, 200);
+  assert.equal(context.state.map.has(`mobile:${installationId}`), false);
+  assert.equal((await context.tenant.fetch(context.request(path, { method: 'DELETE', bearer: context.enrolled.credential }))).status, 200, 'missing installations stay indistinguishable from deleted ones');
+});
+
+test('desktop deletion cannot cross tenant boundaries or use a wrong-tenant credential', async () => {
+  const first = await setup();
+  const second = await setup({ tenantId: 'BBBBBBBBBBBBBBBBBBBBBB', deviceName: 'DESKTOP-B' });
+  const { mobile } = await pairMobile(second, 'Other tenant phone');
+  const installationId = mobile.installation.installationId;
+  const path = `/v1/desktop/mobile/${installationId}`;
+
+  const crossTenantAttempt = await first.tenant.fetch(first.request(path, { method: 'DELETE', bearer: first.enrolled.credential }));
+  assert.equal(crossTenantAttempt.status, 200, 'unknown ids are idempotent to prevent an existence oracle');
+  assert.equal(second.state.map.has(`mobile:${installationId}`), true, 'another tenant storage object must remain untouched');
+
+  const wrongTenantCredential = await second.tenant.fetch(second.request(path, { method: 'DELETE', bearer: first.enrolled.credential }));
+  assert.equal(wrongTenantCredential.status, 401);
+  assert.equal(second.state.map.has(`mobile:${installationId}`), true);
 });
 
 test('managed requests enforce JSON content type, body size, event schema, and no-store', async () => {
