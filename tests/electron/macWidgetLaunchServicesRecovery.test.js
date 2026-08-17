@@ -136,7 +136,7 @@ test('missing packaged Widget artifacts do not launch or create marker state', a
   }
 });
 
-test('symlinked packaged Widget artifacts never launch or create marker state', async () => {
+test('symlinked packaged Widget artifacts never launch or create marker state', async (t) => {
   for (const artifact of ['host', 'appex', 'helper']) {
     const setup = fixture();
     try {
@@ -152,7 +152,15 @@ test('symlinked packaged Widget artifacts never launch or create marker state', 
         : process.platform === 'win32'
           ? 'junction'
           : 'dir';
-      fs.symlinkSync(realTarget, target, linkType);
+      try {
+        fs.symlinkSync(realTarget, target, linkType);
+      } catch (error) {
+        if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) {
+          t.skip(`Windows symlink permission is unavailable (${error.code})`);
+          return;
+        }
+        throw error;
+      }
       let launches = 0;
       const recover = createMacWidgetLaunchServicesRecovery({
         execFile: () => { launches += 1; }

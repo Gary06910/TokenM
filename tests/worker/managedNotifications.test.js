@@ -7,23 +7,25 @@ const test = require('node:test');
 
 function fakeState() {
   const map = new Map();
+  const writes = [];
   return {
     storage: {
       async get(key) { return structuredClone(map.get(key)); },
-      async put(key, value) { map.set(key, structuredClone(value)); },
-      async delete(key) { return map.delete(key); },
+      async put(key, value) { writes.push(['put', key]); map.set(key, structuredClone(value)); },
+      async delete(key) { writes.push(['delete', key]); return map.delete(key); },
       async transaction(callback) {
         return callback({
           async get(key) { return structuredClone(map.get(key)); },
-          async put(key, value) { map.set(key, structuredClone(value)); },
-          async delete(key) { return map.delete(key); }
+          async put(key, value) { writes.push(['put', key]); map.set(key, structuredClone(value)); },
+          async delete(key) { writes.push(['delete', key]); return map.delete(key); }
         });
       },
       async list({ prefix = '', limit = Infinity } = {}) {
         return new Map([...map].filter(([key]) => key.startsWith(prefix)).slice(0, limit).map(([key, value]) => [key, structuredClone(value)]));
       }
     },
-    map
+    map,
+    writes
   };
 }
 
@@ -88,13 +90,15 @@ async function subscribe(context, mobile) {
   assert.equal(response.status, 200);
 }
 
-function event(deviceId, suffix = 'abcdefghijklmnop') {
+async function event(deviceId, { sessionId = 'thr_1', turnId = 'turn_1' } = {}) {
+  const identity = JSON.stringify([1, deviceId, sessionId, turnId, 'codex.turn.completed', 'completed']);
+  const suffix = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity))).toString('base64url');
   return {
     eventId: `evt_${suffix}`,
     type: 'codex.turn.completed',
     deviceId,
-    sessionId: 'thr_1',
-    turnId: 'turn_1',
+    sessionId,
+    turnId,
     status: 'completed',
     project: 'token-m',
     summary: 'Codex task completed',
@@ -172,12 +176,22 @@ test('desktop and mobile auth are endpoint-specific and subscription input is bo
   const { mobile } = await pairMobile(context);
   assert.equal((await context.tenant.fetch(jsonRequest('/v1/desktop/status', { method: 'GET', bearer: mobile.credential }))).status, 401);
   assert.equal((await context.tenant.fetch(jsonRequest('/v1/mobile/status', { method: 'GET', bearer: context.enrolled.credential }))).status, 401);
+  const randomDesktop = context.enrolled.credential.replace(/[^.]+$/, 'Z'.repeat(43));
+  const randomMobile = mobile.credential.replace(/[^.]+$/, 'Y'.repeat(43));
+  assert.equal((await context.tenant.fetch(context.request('/v1/desktop/status', { method: 'GET', bearer: randomDesktop }))).status, 401);
+  assert.equal((await context.tenant.fetch(context.request('/v1/mobile/status', { method: 'GET', bearer: randomMobile }))).status, 401);
   const invalid = await context.tenant.fetch(jsonRequest('/v1/mobile/subscription', {
     method: 'PUT', bearer: mobile.credential, body: {
       permission: 'granted', subscription: { endpoint: 'http://push.example/nope', expirationTime: null, keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) } }
     }
   }));
   assert.equal(invalid.status, 400);
+  const invalidKeys = await context.tenant.fetch(context.request('/v1/mobile/subscription', {
+    method: 'PUT', bearer: mobile.credential, body: {
+      permission: 'granted', subscription: { endpoint: 'https://push.example/nope', expirationTime: null, keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) } }
+    }
+  }));
+  assert.equal(invalidKeys.status, 400);
 });
 
 test('event delivery dedupes and retries only pending installations', async () => {
@@ -193,7 +207,7 @@ test('event delivery dedupes and retries only pending installations', async () =
     return { classification: 'delivered', status: 201 };
   };
 
-  const payload = event(context.enrolled.device.deviceId);
+  const payload = await event(context.enrolled.device.deviceId);
   const initial = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: payload }));
   assert.equal(initial.status, 503);
   assert.equal((await initial.json()).delivered, 1);
@@ -205,18 +219,28 @@ test('event delivery dedupes and retries only pending installations', async () =
   const completeDuplicate = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: payload }));
   assert.equal(completeDuplicate.status, 200);
   assert.equal(calls.length, 3);
+
+  const conflict = await context.tenant.fetch(jsonRequest('/v1/events', {
+    bearer: context.enrolled.credential,
+    body: { ...payload, project: 'stolen-event-id' }
+  }));
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error, 'event_conflict');
+  assert.equal(calls.length, 3, 'conflicting content must never trigger another push');
 });
 
 test('404 and 410 push responses clear only the expired installation', async () => {
-  const context = await setup();
-  const { mobile } = await pairMobile(context);
-  await subscribe(context, mobile);
-  context.tenant.push = async () => ({ classification: 'expired', status: 410 });
-  const response = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: event(context.enrolled.device.deviceId, 'qrstuvwxyzABCDEF') }));
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).expired, 1);
-  const status = await (await context.tenant.fetch(jsonRequest('/v1/mobile/status', { method: 'GET', bearer: mobile.credential }))).json();
-  assert.equal(status.installation.pushEnabled, false);
+  for (const providerStatus of [404, 410]) {
+    const context = await setup();
+    const { mobile } = await pairMobile(context);
+    await subscribe(context, mobile);
+    context.tenant.push = async () => ({ classification: 'expired', status: providerStatus });
+    const response = await context.tenant.fetch(context.request('/v1/events', { bearer: context.enrolled.credential, body: await event(context.enrolled.device.deviceId, { turnId: `turn_${providerStatus}` }) }));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).expired, 1);
+    const status = await (await context.tenant.fetch(context.request('/v1/mobile/status', { method: 'GET', bearer: mobile.credential }))).json();
+    assert.equal(status.installation.pushEnabled, false);
+  }
 });
 
 test('test push targets the caller and DELETE revokes its credential', async () => {
@@ -300,8 +324,45 @@ test('managed requests enforce JSON content type, body size, event schema, and n
   }));
   assert.equal(missingType.status, 415);
   assert.equal(missingType.headers.get('cache-control'), 'no-store');
-  const mismatch = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: event('dev_AAAAAAAAAAAAAAAAAAAAAA') }));
+  const mismatch = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: await event('dev_AAAAAAAAAAAAAAAAAAAAAA') }));
   assert.equal(mismatch.status, 403);
-  const oversized = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: { ...event(context.enrolled.device.deviceId), summary: 'x'.repeat(17 * 1024) } }));
+  const oversized = await context.tenant.fetch(jsonRequest('/v1/events', { bearer: context.enrolled.credential, body: { ...await event(context.enrolled.device.deviceId), summary: 'x'.repeat(17 * 1024) } }));
   assert.equal(oversized.status, 413);
+});
+
+test('random well-formed pairing tokens do not initialize or write unprovisioned tenants', async () => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const state = fakeState();
+  const tenant = new worker.TenantDO(state, ENV);
+  const token = `tm_p1.AAAAAAAAAAAAAAAAAAAAAA.pair_${'B'.repeat(22)}.${'C'.repeat(43)}`;
+  const response = await tenant.fetch(jsonRequest('/v1/pairings/redeem', {
+    body: { token, installationName: 'Attacker phone' }
+  }));
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error, 'invalid_pairing');
+  assert.equal(state.map.size, 0);
+  assert.deepEqual(state.writes, [], 'anonymous invalid redemption must cause zero Durable Object storage writes');
+});
+
+test('event identity and privacy fields are server-enforced', async () => {
+  const context = await setup();
+  const valid = await event(context.enrolled.device.deviceId);
+  for (const field of ['prompt', 'assistantResponse', 'transcriptPath', 'source']) {
+    const response = await context.tenant.fetch(context.request('/v1/events', {
+      bearer: context.enrolled.credential,
+      body: { ...valid, [field]: 'private material' }
+    }));
+    assert.equal(response.status, 400, field);
+  }
+  for (const body of [
+    { ...valid, summary: 'arbitrary notification body' },
+    { ...valid, eventId: `evt_${'A'.repeat(43)}` },
+    { ...valid, eventId: `evt_${'A'.repeat(42)}` }
+  ]) {
+    const response = await context.tenant.fetch(context.request('/v1/events', {
+      bearer: context.enrolled.credential,
+      body
+    }));
+    assert.equal(response.status, 400);
+  }
 });

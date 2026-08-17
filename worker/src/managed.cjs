@@ -1,6 +1,6 @@
 const IDENTIFIER = '[A-Za-z0-9_-]';
 const TOKEN_RE = new RegExp(`^(tm_[dmp]1)\\.(${IDENTIFIER}{22})\\.((?:dev_|mob_|pair_)${IDENTIFIER}{22})\\.(${IDENTIFIER}{43})$`);
-const EVENT_ID_RE = /^evt_[A-Za-z0-9_-]{16,128}$/;
+const EVENT_ID_RE = /^evt_[A-Za-z0-9_-]{43}$/;
 const PAIR_TTL_MS = 10 * 60 * 1000;
 const EVENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_JSON_BYTES = 16 * 1024;
@@ -100,7 +100,13 @@ function pushPayload(event) {
   };
 }
 
-function normalizeManagedEvent(value, authenticatedDeviceId, nowMs = Date.now()) {
+async function completionEventId(value) {
+  const identity = JSON.stringify([1, value.deviceId, value.sessionId, value.turnId, value.type, value.status]);
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(identity));
+  return `evt_${base64url(new Uint8Array(digest))}`;
+}
+
+async function normalizeManagedEvent(value, authenticatedDeviceId, nowMs = Date.now()) {
   requireExactKeys(value, ['eventId', 'type', 'deviceId', 'sessionId', 'turnId', 'status', 'project', 'summary', 'occurredAt', 'durationMs']);
   const event = {
     eventId: boundedString(value.eventId, 'eventId', 132, { pattern: EVENT_ID_RE }),
@@ -115,6 +121,8 @@ function normalizeManagedEvent(value, authenticatedDeviceId, nowMs = Date.now())
   };
   if (event.type !== 'codex.turn.completed' || event.status !== 'completed') throw Object.assign(new Error('Unsupported event type or status'), { status: 422, code: 'unsupported_event' });
   if (event.deviceId !== authenticatedDeviceId) throw Object.assign(new Error('Event device does not match credential'), { status: 403, code: 'device_mismatch' });
+  if (event.summary !== 'Codex task completed') throw Object.assign(new Error('summary must use the privacy-safe completion text'), { status: 400, code: 'invalid_request' });
+  if (event.eventId !== await completionEventId(event)) throw Object.assign(new Error('eventId does not match the event identity'), { status: 400, code: 'invalid_request' });
   const occurred = Date.parse(event.occurredAt);
   if (!Number.isFinite(occurred) || new Date(occurred).toISOString() !== event.occurredAt || Math.abs(nowMs - occurred) > EVENT_TTL_MS) throw Object.assign(new Error('occurredAt is outside the accepted window'), { status: 422, code: 'invalid_event_time' });
   if (/[\\/\u0000-\u001f\u007f]/.test(event.project)) throw Object.assign(new Error('project must be a sanitized directory name'), { status: 400, code: 'invalid_request' });
@@ -215,10 +223,14 @@ return class TenantDO {
     const tenantId = request.headers.get('x-token-m-tenant-id') || '';
     const configurationError = this.configurationError();
     if (configurationError) return errorResponse(503, 'managed_not_configured', configurationError, request);
-    await this.initialize(tenantId);
-    await this.cleanup();
     try {
       if (url.pathname === '/v1/desktop/enroll') return await this.enroll(request, tenantId);
+      const meta = await this.state.storage.get('meta');
+      if (!meta || meta.tenantId !== tenantId) {
+        if (url.pathname === '/v1/pairings/redeem') return errorResponse(400, 'invalid_pairing', 'Pairing token is invalid or expired', request);
+        return errorResponse(401, 'unauthorized', 'Credential is invalid', request);
+      }
+      await this.cleanup();
       if (url.pathname === '/v1/pairings/redeem') return await this.redeem(request, tenantId);
       if (url.pathname === '/v1/desktop/status') return await this.desktopStatus(request, tenantId);
       if (url.pathname === '/v1/desktop/test') return await this.desktopTestPush(request);
@@ -240,6 +252,7 @@ return class TenantDO {
     const expected = String(this.env.TOKEN_M_ENROLLMENT_SECRET || '');
     const presented = request.headers.get('x-token-m-enrollment-secret') || '';
     if (!expected || !timingSafeEqual(expected, presented)) return errorResponse(403, 'invalid_enrollment', 'Enrollment capability is invalid', request);
+    await this.initialize(tenantId);
     const existing = await this.state.storage.list({ prefix: 'device:', limit: 1 });
     if (existing.size) return errorResponse(409, 'tenant_exists', 'Tenant is already enrolled', request);
     const body = await readJson(request, 2048);
@@ -341,7 +354,7 @@ return class TenantDO {
     if (!auth) return errorResponse(401, 'unauthorized', 'Desktop credential is invalid', request);
     if (!await this.rateLimit(`events:${auth.parsed.subjectId}`, 120)) return errorResponse(429, 'rate_limited', 'Too many requests', request);
     const body = await readJson(request);
-    const event = normalizeManagedEvent(body, auth.parsed.subjectId, this.now());
+    const event = await normalizeManagedEvent(body, auth.parsed.subjectId, this.now());
     const key = `event:${event.eventId}`;
     let stored = await this.state.storage.get(key);
     const duplicate = Boolean(stored);
