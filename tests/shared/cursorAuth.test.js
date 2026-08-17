@@ -1,0 +1,116 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const { readActiveAccount, runCursorLogin, runCursorLogout } = require('../../src/shared/cursorAuth');
+
+function withTempHome(payload) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
+  const credPath = path.join(tmp, '.config', 'tokscale', 'cursor-credentials.json');
+  fs.mkdirSync(path.dirname(credPath), { recursive: true });
+  if (payload !== undefined) fs.writeFileSync(credPath, JSON.stringify(payload));
+  return { home: tmp, credPath, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }) };
+}
+
+test('readActiveAccount returns null when file is missing', () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns active account when present', () => {
+  const payload = {
+    version: 1,
+    activeAccountId: 'a1',
+    accounts: {
+      a1: { sessionToken: 'tok-a1', userId: 'u1', createdAt: '2026-05-26T00:00:00Z', label: 'work' },
+      a2: { sessionToken: 'tok-a2', userId: 'u2', createdAt: '2026-05-25T00:00:00Z' }
+    }
+  };
+  const { home, cleanup } = withTempHome(payload);
+  try {
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'a1');
+    assert.equal(acct.sessionToken, 'tok-a1');
+    assert.equal(acct.userId, 'u1');
+    assert.equal(acct.label, 'work');
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns null when activeAccountId is missing from accounts map', () => {
+  const payload = { version: 1, activeAccountId: 'ghost', accounts: { a1: { sessionToken: 't' } } };
+  const { home, cleanup } = withTempHome(payload);
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns null on malformed JSON', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
+  const credPath = path.join(tmp, '.config', 'tokscale', 'cursor-credentials.json');
+  fs.mkdirSync(path.dirname(credPath), { recursive: true });
+  fs.writeFileSync(credPath, '{not json');
+  try {
+    assert.equal(readActiveAccount({ home: tmp }), null);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('readActiveAccount returns null on empty accounts map', () => {
+  const { home, cleanup } = withTempHome({ version: 1, activeAccountId: '', accounts: {} });
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin writes credentials file with extracted user id from "::" delimiter', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_01HXYZ::tok-value-here', { home });
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'user_01HXYZ');
+    assert.equal(acct.sessionToken, 'user_01HXYZ::tok-value-here');
+    assert.equal(acct.userId, 'user_01HXYZ');
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin derives anon-* account id when no delimiter', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('plain-token-no-delimiter', { home });
+    const acct = readActiveAccount({ home });
+    assert.match(acct.id, /^anon-[0-9a-f]{12}$/);
+    assert.equal(acct.userId, null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin handles URL-encoded :: delimiter (%3A%3A)', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_01ABC%3A%3Aopaque-token', { home });
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'user_01ABC');
+    assert.equal(acct.userId, 'user_01ABC');
+  } finally { cleanup(); }
+});
+
+test('runCursorLogout removes active account and deletes file when empty', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_x::tok', { home });
+    assert.equal(readActiveAccount({ home }).id, 'user_x');
+    await runCursorLogout({ home });
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin throws on empty token', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await assert.rejects(() => runCursorLogin('', { home }), /token/i);
+  } finally { cleanup(); }
+});
