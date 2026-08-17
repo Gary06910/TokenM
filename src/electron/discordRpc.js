@@ -51,12 +51,12 @@ function buildPayload(stats, currency = 'USD', compactTokenUnits = 'western', lo
   const base = {
     type: 0,
     largeImageKey: 'logo',
-    largeImageText: 'Token Monitor',
+    largeImageText: 'Token M',
     startTimestamp,
     buttons: [{ label: 'View on GitHub', url: GITHUB_URL }]
   };
   if (totalTokens === 0) {
-    return { ...base, details: 'Token Monitor', state: 'No usage today' };
+    return { ...base, details: 'Token M', state: 'No usage today' };
   }
   const top = topClient(today);
   const label = (top && CLIENT_LABELS[top]) || (top ? top : 'Active');

@@ -41,7 +41,7 @@ test('desktopFileContents produces a desktop entry pointing at the AppImage', ()
   const contents = desktopFileContents('/opt/apps/Token Monitor.AppImage');
   assert.match(contents, /^\[Desktop Entry\]\n/);
   assert.match(contents, /\nType=Application\n/);
-  assert.match(contents, /\nName=Token Monitor\n/);
+  assert.match(contents, /\nName=Token M\n/);
   assert.match(contents, /\nExec="\/opt\/apps\/Token Monitor\.AppImage"\n/);
   assert.match(contents, /\nX-GNOME-Autostart-enabled=true\n/);
   assert.ok(contents.endsWith('\n'));

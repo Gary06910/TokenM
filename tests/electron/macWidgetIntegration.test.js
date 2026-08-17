@@ -634,11 +634,11 @@ test('Widget page control cycles pages with per-family App Intent state', () => 
   assert.doesNotMatch(`${widgetSource}\n${widgetIntentSource}`, /reloadAllTimelines/);
 });
 
-test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {
+test('macOS Widget packaging uses the Token M product name', () => {
   assert.equal(packageJson.scripts['mac:local'], undefined);
   assert.equal(packageJson.scripts['mac:local:open'], undefined);
-  assert.equal(packageJson.productName, 'Token Monitor');
-  assert.equal(packageJson.build.productName, 'Token Monitor');
+  assert.equal(packageJson.productName, 'Token M');
+  assert.equal(packageJson.build.productName, 'Token M');
 });
 
 test('Widget build provenance fields are injected into the extension Info.plist', () => {

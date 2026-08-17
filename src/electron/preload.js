@@ -2,6 +2,21 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+contextBridge.exposeInMainWorld('tokenMNotifications', {
+  getStatus: () => ipcRenderer.invoke('notifications:getStatus'),
+  enroll: (request) => ipcRenderer.invoke('notifications:enroll', request),
+  enableCodexHook: () => ipcRenderer.invoke('notifications:enableCodexHook'),
+  disableCodexHook: () => ipcRenderer.invoke('notifications:disableCodexHook'),
+  createPairing: () => ipcRenderer.invoke('notifications:createPairing'),
+  sendTest: () => ipcRenderer.invoke('notifications:sendTest'),
+  unpair: (installationId) => ipcRenderer.invoke('notifications:unpair', installationId),
+  onStatus: (callback) => {
+    const listener = (_event, status) => { try { callback(status); } catch (_) {} };
+    ipcRenderer.on('notifications:status', listener);
+    return () => ipcRenderer.removeListener('notifications:status', listener);
+  }
+});
+
 contextBridge.exposeInMainWorld('tokenMonitor', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),

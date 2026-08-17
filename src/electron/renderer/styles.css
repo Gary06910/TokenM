@@ -1074,6 +1074,7 @@ span.settings-note.settings-item-desc {
 .settings-section-icon-tools { --settings-section-icon-url: url("icons/settings/collection.svg"); }
 .settings-section-icon-limits { --settings-section-icon-url: url("icons/settings/limits.svg"); }
 .settings-section-icon-sync { --settings-section-icon-url: url("icons/settings/sync.svg"); }
+.settings-section-icon-notifications { --settings-section-icon-url: url("icons/settings/sync.svg"); }
 .settings-section-icon-subscriptions { --settings-section-icon-url: url("icons/settings/subscriptions.svg"); }
 .settings-section-icon-appearance { --settings-section-icon-url: url("icons/settings/appearance.svg"); }
 .cursor-settings-toggle {
@@ -1486,6 +1487,70 @@ span.settings-note.settings-item-desc {
   display: grid;
   min-width: 0;
   gap: 4px;
+}
+
+.notification-enrollment-fields,
+.notification-pairing-card,
+.notification-hook-card {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-hook-card,
+.notification-device-status,
+.notification-pairing-card {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.notification-hook-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.notification-hook-card .settings-note {
+  margin: 4px 0 0;
+}
+
+.notification-qr-panel {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.notification-qr-panel img {
+  width: min(220px, 100%);
+  aspect-ratio: 1;
+  padding: 8px;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.notification-installations-heading {
+  margin-top: 12px;
+  font-weight: 650;
+}
+
+.notification-installation-list {
+  display: grid;
+  gap: 6px;
+}
+
+.notification-installation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.notification-installation-meta {
+  color: var(--muted);
+  font-size: 11px;
 }
 .settings-panel .hub-mode-option {
   display: flex;

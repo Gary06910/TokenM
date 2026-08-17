@@ -26,6 +26,7 @@ const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./claudeWebFetch');
 const { createElectronLimitsFetch } = require('./limitsFetch');
+const { createTokenMNotificationRuntime } = require('./tokenMNotificationRuntime');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -312,7 +313,8 @@ const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 
 if (!app.isPackaged) loadDotEnv();
 
-const APP_NAME = 'Token Monitor';
+const APP_NAME = 'Token M';
+const LEGACY_USER_DATA_PATH = path.join(app.getPath('appData'), 'Token Monitor');
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
@@ -355,6 +357,7 @@ let settings = null;
 let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
+let tokenMNotificationRuntime = null;
 let credentialStorageErrorShown = false;
 let sessionUsageArchive = null;
 let lastSessionUsageArchiveUpdate = {
@@ -368,6 +371,10 @@ const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new
 const diagnosticJournal = createDiagnosticJournal();
 const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
+// productName is now Token M, but changing Electron's default userData folder
+// would make existing settings and credentials appear to vanish. Pin the old
+// location before changing the visible app name.
+app.setPath('userData', LEGACY_USER_DATA_PATH);
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
 
@@ -509,6 +516,11 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
+    tokenMCloudUrl: '',
+    tokenMCloudDeviceId: '',
+    tokenMCloudDeviceName: '',
+    tokenMCodexHookEnabled: false,
+    tokenMCloudCredential: '',
     claudeWebCookie: '',
     opencodeCookie: '',
     opencodeProfiles: {},
@@ -1994,7 +2006,7 @@ function reportCredentialStorageError(context, error) {
   try {
     dialog.showErrorBox(
       'Credential storage error',
-      `Token Monitor could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
+      `Token M could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
     );
   } catch (_) {}
 }
@@ -2201,6 +2213,32 @@ function saveSettings(options = {}) {
     if (options.throwOnError) throw error;
     return false;
   }
+}
+
+async function commitTokenMNotificationSettings(patch) {
+  settings = { ...settings, ...(patch || {}) };
+  saveSettings({ throwOnError: true });
+  return settings;
+}
+
+function emitTokenMNotificationStatus(status) {
+  const contents = mainWindow?.webContents;
+  sendWhenRendererReady(contents, 'notifications:status', status);
+}
+
+function ensureTokenMNotificationRuntime() {
+  if (tokenMNotificationRuntime) return tokenMNotificationRuntime;
+  tokenMNotificationRuntime = createTokenMNotificationRuntime({
+    userDataPath: app.getPath('userData'),
+    fetch: electronLimitsFetch(),
+    getSettings: () => settings,
+    commitSettings: commitTokenMNotificationSettings,
+    emitStatus: emitTokenMNotificationStatus,
+    logger: {
+      warn: (message, detail) => console.warn(`[notifications] ${message}`, detail || '')
+    }
+  });
+  return tokenMNotificationRuntime;
 }
 
 function loginItemEnabledHere() {
@@ -3831,7 +3869,7 @@ function updateTrayDisplay() {
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
   const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
-  tray.setToolTip(`Token Monitor - ${tip}`);
+  tray.setToolTip(`Token M - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
@@ -4808,6 +4846,7 @@ function restartDeviceRuntimeForMode() {
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
 function stopAll() {
+  tokenMNotificationRuntime?.shutdownSync();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
@@ -5890,7 +5929,18 @@ app.whenReady().then(() => {
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
+  const notifications = ensureTokenMNotificationRuntime();
+  void notifications.start().catch((error) => {
+    console.warn('[notifications] startup failed', { code: error?.code || 'startup_failed' });
+  });
   ipcMain.handle('settings:get', () => settingsForRenderer());
+  ipcMain.handle('notifications:getStatus', () => notifications.getStatus());
+  ipcMain.handle('notifications:enroll', (_event, request) => notifications.enroll(request || {}));
+  ipcMain.handle('notifications:enableCodexHook', () => notifications.enableCodexHook());
+  ipcMain.handle('notifications:disableCodexHook', () => notifications.disableCodexHook());
+  ipcMain.handle('notifications:createPairing', () => notifications.createPairing());
+  ipcMain.handle('notifications:sendTest', () => notifications.sendTest());
+  ipcMain.handle('notifications:unpair', (_event, installationId) => notifications.unpair(installationId));
 
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {

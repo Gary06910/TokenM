@@ -29,7 +29,8 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   ollamaCookie: ['providers', 'ollama', 'cookie'],
-  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles'],
+  tokenMCloudCredential: ['tokenM', 'cloudCredential']
 });
 
 function emptyDocument() {

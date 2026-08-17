@@ -293,7 +293,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'notifications', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
@@ -317,6 +317,8 @@ state.toolPreferenceSourceSignature = '';
 state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
+state.notificationStatus = null;
+state.notificationPairing = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -450,6 +452,24 @@ Object.assign(els, {
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
+  notificationsSettingsSummary: document.getElementById('notificationsSettingsSummary'),
+  notificationEnrollmentFields: document.getElementById('notificationEnrollmentFields'),
+  notificationConfiguredFields: document.getElementById('notificationConfiguredFields'),
+  notificationCloudUrlInput: document.getElementById('notificationCloudUrlInput'),
+  notificationEnrollmentCodeInput: document.getElementById('notificationEnrollmentCodeInput'),
+  notificationEnrollButton: document.getElementById('notificationEnrollButton'),
+  notificationDeviceStatus: document.getElementById('notificationDeviceStatus'),
+  notificationHookStatus: document.getElementById('notificationHookStatus'),
+  notificationTrustNote: document.getElementById('notificationTrustNote'),
+  notificationEnableHookButton: document.getElementById('notificationEnableHookButton'),
+  notificationDisableHookButton: document.getElementById('notificationDisableHookButton'),
+  notificationPairButton: document.getElementById('notificationPairButton'),
+  notificationTestButton: document.getElementById('notificationTestButton'),
+  notificationQrPanel: document.getElementById('notificationQrPanel'),
+  notificationQrImage: document.getElementById('notificationQrImage'),
+  notificationPairingExpiry: document.getElementById('notificationPairingExpiry'),
+  notificationInstallationList: document.getElementById('notificationInstallationList'),
+  notificationActionStatus: document.getElementById('notificationActionStatus'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
   themeCodeInput: document.getElementById('themeCodeInput'),
@@ -703,6 +723,10 @@ function settingsSectionSummary(section) {
     if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
     if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
     return t('settings.sync.localOnly');
+  }
+  if (section === 'notifications') {
+    if (!state.notificationStatus?.configured) return t('settings.notifications.notConfigured');
+    return t('settings.notifications.summary', { count: state.notificationStatus.mobileInstallations?.length || 0 });
   }
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
@@ -8321,6 +8345,102 @@ function renderSessionUsageArchiveStatus() {
     : t('settings.collection.sessionArchiveEmpty');
 }
 
+function notificationErrorText(error) {
+  const raw = String(error?.message || error || '');
+  const match = raw.match(/[a-z][a-z0-9_]{2,80}/i);
+  return match?.[0] || t('settings.notifications.actionFailed');
+}
+
+function setNotificationActionStatus(text, error = false) {
+  if (!els.notificationActionStatus) return;
+  els.notificationActionStatus.textContent = text || '';
+  els.notificationActionStatus.classList.toggle('error', error);
+}
+
+function renderNotificationSettings() {
+  const status = state.notificationStatus;
+  const configured = status?.configured === true;
+  els.notificationEnrollmentFields?.classList.toggle('hidden', configured);
+  els.notificationConfiguredFields?.classList.toggle('hidden', !configured);
+  if (els.notificationCloudUrlInput && !els.notificationCloudUrlInput.value) {
+    els.notificationCloudUrlInput.value = status?.baseUrl || '';
+  }
+  if (els.notificationsSettingsSummary) {
+    els.notificationsSettingsSummary.textContent = configured
+      ? t('settings.notifications.summary', { count: status.mobileInstallations?.length || 0 })
+      : t('settings.notifications.notConfigured');
+  }
+  if (!configured) return;
+  if (els.notificationDeviceStatus) {
+    els.notificationDeviceStatus.textContent = t('settings.notifications.connectedAs', {
+      name: status.device?.name || status.device?.deviceId || '—'
+    });
+  }
+  const hookEnabled = status.hook?.enabled === true;
+  if (els.notificationHookStatus) {
+    els.notificationHookStatus.textContent = hookEnabled
+      ? t('settings.notifications.hookEnabled')
+      : t('settings.notifications.hookDisabled');
+  }
+  els.notificationEnableHookButton?.classList.toggle('hidden', hookEnabled);
+  els.notificationDisableHookButton?.classList.toggle('hidden', !hookEnabled);
+  els.notificationTrustNote?.classList.toggle('hidden', !hookEnabled || status.hook?.needsTrust !== true);
+  if (els.notificationTestButton) els.notificationTestButton.disabled = !(status.mobileInstallations?.length > 0);
+  if (els.notificationInstallationList) {
+    els.notificationInstallationList.replaceChildren();
+    const installations = status.mobileInstallations || [];
+    if (installations.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'settings-note';
+      empty.textContent = t('settings.notifications.noDevices');
+      els.notificationInstallationList.append(empty);
+    }
+    for (const installation of installations) {
+      const row = document.createElement('div');
+      row.className = 'notification-installation-row';
+      const detail = document.createElement('div');
+      const name = document.createElement('div');
+      name.textContent = installation.name || installation.installationId;
+      const meta = document.createElement('div');
+      meta.className = 'notification-installation-meta';
+      meta.textContent = installation.pushEnabled
+        ? t('settings.notifications.pushEnabled')
+        : t('settings.notifications.pushDisabled');
+      detail.append(name, meta);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = t('settings.notifications.unpair');
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try {
+          state.notificationStatus = await window.tokenMNotifications.unpair(installation.installationId);
+          state.notificationPairing = null;
+          renderNotificationSettings();
+          setNotificationActionStatus(t('settings.notifications.unpaired'));
+        } catch (error) {
+          setNotificationActionStatus(notificationErrorText(error), true);
+          remove.disabled = false;
+        }
+      });
+      row.append(detail, remove);
+      els.notificationInstallationList.append(row);
+    }
+  }
+}
+
+function showNotificationPairing(pairing) {
+  if (!pairing?.pairingUrl || typeof window.qrcode !== 'function') throw new Error('qr_unavailable');
+  const qr = window.qrcode(0, 'M');
+  qr.addData(pairing.pairingUrl, 'Byte');
+  qr.make();
+  els.notificationQrImage.src = qr.createDataURL(5, 8);
+  els.notificationQrPanel.classList.remove('hidden');
+  const expires = new Date(pairing.expiresAt);
+  els.notificationPairingExpiry.textContent = t('settings.notifications.expiresAt', {
+    time: Number.isFinite(expires.getTime()) ? expires.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'
+  });
+}
+
 function syncSettingsForm() {
   applySettingsTranslations();
   applyInitialBreakdownPreference();
@@ -8344,6 +8464,7 @@ function syncSettingsForm() {
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   renderSubscriptionSettings();
+  renderNotificationSettings();
   const showLimitUsed = state.settings.showLimitUsed ? 'used' : 'remaining';
   for (const input of els.showLimitUsedInputs || []) input.checked = input.value === showLimitUsed;
   if (els.syncUploadIntervalInput) {
@@ -10786,11 +10907,17 @@ async function init() {
   };
   window.tokenMonitor.onSystemUiThemePush?.((payload) => applySystemUiTheme(payload?.dark === true));
   try { state.appInfo = await window.tokenMonitor.getAppInfo?.(); } catch (_) {}
+  window.tokenMNotifications?.onStatus?.((status) => {
+    state.notificationStatus = status;
+    renderNotificationSettings();
+    renderSettingsSummaries();
+  });
   // Seeding assigns directly: the rest of init delivers both icon sets anyway,
   // and settings have not loaded yet, so repainting from here would only churn.
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  try { state.notificationStatus = await window.tokenMNotifications?.getStatus(); } catch (_) {}
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
@@ -10968,6 +11095,68 @@ els.saveSettingsButton.addEventListener('click', async () => {
   await refreshHubInfo();
   void refreshHubBuildStatus();
   await refreshStats();
+});
+
+els.notificationEnrollButton?.addEventListener('click', async () => {
+  const baseUrl = els.notificationCloudUrlInput.value.trim();
+  const code = els.notificationEnrollmentCodeInput.value;
+  els.notificationEnrollButton.disabled = true;
+  setNotificationActionStatus(t('settings.notifications.enrolling'));
+  try {
+    state.notificationStatus = await window.tokenMNotifications.enroll({ baseUrl, code });
+    els.notificationEnrollmentCodeInput.value = '';
+    renderNotificationSettings();
+    setNotificationActionStatus(t('settings.notifications.enrolled'));
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  } finally {
+    els.notificationEnrollButton.disabled = false;
+  }
+});
+
+els.notificationEnableHookButton?.addEventListener('click', async () => {
+  try {
+    await window.tokenMNotifications.enableCodexHook();
+    state.notificationStatus = await window.tokenMNotifications.getStatus();
+    renderNotificationSettings();
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  }
+});
+
+els.notificationDisableHookButton?.addEventListener('click', async () => {
+  try {
+    await window.tokenMNotifications.disableCodexHook();
+    state.notificationStatus = await window.tokenMNotifications.getStatus();
+    renderNotificationSettings();
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  }
+});
+
+els.notificationPairButton?.addEventListener('click', async () => {
+  els.notificationPairButton.disabled = true;
+  try {
+    state.notificationPairing = await window.tokenMNotifications.createPairing();
+    showNotificationPairing(state.notificationPairing);
+    setNotificationActionStatus(t('settings.notifications.scanQr'));
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  } finally {
+    els.notificationPairButton.disabled = false;
+  }
+});
+
+els.notificationTestButton?.addEventListener('click', async () => {
+  els.notificationTestButton.disabled = true;
+  try {
+    await window.tokenMNotifications.sendTest();
+    setNotificationActionStatus(t('settings.notifications.testSent'));
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  } finally {
+    els.notificationTestButton.disabled = !(state.notificationStatus?.mobileInstallations?.length > 0);
+  }
 });
 
 els.hubModeOptions.addEventListener('change', async (event) => {
