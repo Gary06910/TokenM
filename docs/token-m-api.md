@@ -82,6 +82,8 @@ Response `201`:
 }
 ```
 
+TTL is 10 minutes. Creating a new challenge does not revoke already-bound phones.
+
 ### `POST /v1/desktop/test`
 
 Auth: desktop bearer. Empty object request. Sends one privacy-safe test notification to every active mobile installation in the authenticated tenant; it never accepts a tenant id or notification body from the caller.
@@ -97,8 +99,6 @@ Transient provider failures return retryable `503`. Expired 404/410 subscription
 ### `DELETE /v1/desktop/mobile/:installationId`
 
 Auth: desktop bearer. Revokes the named installation only inside the authenticated tenant. The path id must match the frozen `mob_...` shape. The operation is idempotent and returns `200 {"ok":true}` whether that id was already absent, preventing cross-tenant existence probing. It never accepts a tenant id from the caller.
-
-TTL is 10 minutes. Creating a new challenge does not revoke already-bound phones.
 
 ### `POST /v1/pairings/redeem`
 

@@ -39,6 +39,7 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
 ]);
 const WORKER_RUNTIME_SOURCE_FILES = Object.freeze([
   'worker/src/index.js',
+  'worker/src/managed.cjs',
   'worker/wrangler.toml'
 ]);
 
