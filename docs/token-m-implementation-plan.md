@@ -186,6 +186,8 @@ GET    /v1/desktop/status
 POST   /v1/pairings
 POST   /v1/pairings/redeem
 POST   /v1/events
+POST   /v1/desktop/test
+DELETE /v1/desktop/mobile/:installationId
 GET    /v1/mobile/status
 PUT    /v1/mobile/subscription
 POST   /v1/mobile/test
@@ -279,4 +281,3 @@ Owns Electron preload/main IPC integration points, renderer UI/styles/i18n, visi
 ### Integration and QA
 
 Sol High reviews and integrates A-D in that order where dependencies require it, resolves only contract-level seams, runs final generated-code/build-registry flows once, and creates the integration commit. A fresh QA agent then performs adversarial auth/push/compatibility/privacy testing and may add tests or small fixes without architectural rewrites.
-

@@ -82,6 +82,22 @@ Response `201`:
 }
 ```
 
+### `POST /v1/desktop/test`
+
+Auth: desktop bearer. Empty object request. Sends one privacy-safe test notification to every active mobile installation in the authenticated tenant; it never accepts a tenant id or notification body from the caller.
+
+Response `200`:
+
+```json
+{ "ok": true, "eventId": "evt_test_...", "delivered": 1, "expired": 0 }
+```
+
+Transient provider failures return retryable `503`. Expired 404/410 subscriptions are removed and counted in `expired` without exposing endpoints or subscription keys.
+
+### `DELETE /v1/desktop/mobile/:installationId`
+
+Auth: desktop bearer. Revokes the named installation only inside the authenticated tenant. The path id must match the frozen `mob_...` shape. The operation is idempotent and returns `200 {"ok":true}` whether that id was already absent, preventing cross-tenant existence probing. It never accepts a tenant id from the caller.
+
 TTL is 10 minutes. Creating a new challenge does not revoke already-bound phones.
 
 ### `POST /v1/pairings/redeem`
@@ -262,7 +278,7 @@ onStatus(callback)             // -> unsubscribe fn
 
 Forbidden renderer fields: desktop/mobile bearer, enrollment secret, credential MAC/pepper, bridge token, VAPID private key, PushSubscription keys, raw hook stdin, transcript path, assistant response.
 
-Agent D may initially wire `sendTest()` to create a privacy-safe synthetic completion through the desktop core or to a dedicated authenticated desktop test helper. It must not call a mobile endpoint with a desktop credential.
+`sendTest()` calls `POST /v1/desktop/test`; `unpair(installationId)` calls `DELETE /v1/desktop/mobile/:installationId`. Desktop code must not call a mobile-auth endpoint with a desktop credential.
 
 ## 6. PWA client contract
 
@@ -348,4 +364,3 @@ tokenMCodexHookEnabled
 ```
 
 Internal legacy names and `TOKEN_MONITOR_*` compatibility variables are not mechanically renamed.
-
