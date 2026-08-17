@@ -1,0 +1,178 @@
+'use strict';
+
+const crypto = require('node:crypto');
+const nodeFs = require('node:fs');
+const path = require('node:path');
+
+const MAX_HOOKS_BYTES = 256 * 1024;
+
+function configPathFor(codexHome) {
+  if (typeof codexHome !== 'string' || !path.isAbsolute(codexHome)) {
+    throw new TypeError('codexHome must be an absolute path');
+  }
+  return path.join(codexHome, 'hooks.json');
+}
+
+function assertCodexHomeSafe(codexHome, fsApi) {
+  try {
+    const stat = fsApi.lstatSync(codexHome);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Codex home must be a real directory');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+function readConfig(configPath, fsApi) {
+  let stat;
+  try {
+    stat = fsApi.lstatSync(configPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { exists: false, raw: null, value: { hooks: {} } };
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Codex hooks.json must be a regular file');
+  if (stat.size > MAX_HOOKS_BYTES) throw new Error(`Codex hooks.json exceeds ${MAX_HOOKS_BYTES} bytes`);
+  const constants = fsApi.constants || nodeFs.constants;
+  let descriptor;
+  try {
+    descriptor = fsApi.openSync(configPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const descriptorStat = fsApi.fstatSync(descriptor);
+    if (!descriptorStat.isFile() || descriptorStat.size > MAX_HOOKS_BYTES) {
+      throw new Error('Codex hooks.json must be a bounded regular file');
+    }
+    const raw = fsApi.readFileSync(descriptor, 'utf8');
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Codex hooks.json must contain an object');
+    return { exists: true, raw, value };
+  } finally {
+    if (descriptor !== undefined) fsApi.closeSync(descriptor);
+  }
+}
+
+function commandValue(entry) {
+  return entry && typeof entry === 'object' && entry.type === 'command' ? entry.command : null;
+}
+
+function identityValue(commandIdentity) {
+  return typeof commandIdentity === 'string' ? commandIdentity : commandIdentity?.command;
+}
+
+function containsCommand(config, identity) {
+  const target = identityValue(identity);
+  if (!target) return false;
+  return (config?.hooks?.Stop || []).some((group) => (
+    Array.isArray(group?.hooks) && group.hooks.some((entry) => commandValue(entry) === target)
+  ));
+}
+
+function hookState(configPath, enabled, backupPath = null, error = null) {
+  return { enabled, needsTrust: enabled, configPath, backupPath, error };
+}
+
+function readCodexHookState({ codexHome, commandIdentity, fs: fsApi = nodeFs }) {
+  const configPath = configPathFor(codexHome);
+  try {
+    assertCodexHomeSafe(codexHome, fsApi);
+    return hookState(configPath, containsCommand(readConfig(configPath, fsApi).value, commandIdentity));
+  } catch (error) {
+    return hookState(configPath, false, null, error.message || String(error));
+  }
+}
+
+function assertDestinationSafe(filePath, fsApi) {
+  try {
+    const stat = fsApi.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Codex hooks.json must be a regular file');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+function writeAtomic(filePath, value, fsApi) {
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  let descriptor;
+  fsApi.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  try {
+    descriptor = fsApi.openSync(temporary, 'wx', 0o600);
+    fsApi.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fsApi.fsyncSync(descriptor);
+    fsApi.closeSync(descriptor);
+    descriptor = undefined;
+    assertDestinationSafe(filePath, fsApi);
+    fsApi.renameSync(temporary, filePath);
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fsApi.closeSync(descriptor); } catch (_) {}
+    }
+    try { fsApi.rmSync(temporary, { force: true }); } catch (_) {}
+    throw error;
+  }
+}
+
+function backupExisting(configPath, raw, fsApi) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let candidate = `${configPath}.token-m-backup-${stamp}`;
+  let suffix = 0;
+  while (true) {
+    try {
+      fsApi.writeFileSync(candidate, raw, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      return candidate;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      suffix += 1;
+      candidate = `${configPath}.token-m-backup-${stamp}-${suffix}`;
+    }
+  }
+}
+
+function enableCodexStopHook({ codexHome, command, commandWindows, backup = true, fs: fsApi = nodeFs }) {
+  const configPath = configPathFor(codexHome);
+  let createdBackupPath = null;
+  try {
+    assertCodexHomeSafe(codexHome, fsApi);
+    const selectedCommand = process.platform === 'win32' && commandWindows ? commandWindows : command;
+    if (typeof selectedCommand !== 'string' || !selectedCommand.trim()) throw new TypeError('Hook command is required');
+    const document = readConfig(configPath, fsApi);
+    if (containsCommand(document.value, selectedCommand)) return hookState(configPath, true);
+    const value = structuredClone(document.value);
+    if (value.hooks === undefined) value.hooks = {};
+    if (!value.hooks || typeof value.hooks !== 'object' || Array.isArray(value.hooks)) throw new Error('hooks must be an object');
+    if (value.hooks.Stop === undefined) value.hooks.Stop = [];
+    if (!Array.isArray(value.hooks.Stop)) throw new Error('hooks.Stop must be an array');
+    value.hooks.Stop.push({ matcher: '', hooks: [{ type: 'command', command: selectedCommand, timeout: 5 }] });
+    const backupPath = document.exists && backup ? backupExisting(configPath, document.raw, fsApi) : null;
+    createdBackupPath = backupPath;
+    writeAtomic(configPath, value, fsApi);
+    return hookState(configPath, true, backupPath);
+  } catch (error) {
+    return hookState(configPath, false, createdBackupPath, error.message || String(error));
+  }
+}
+
+function disableCodexStopHook({ codexHome, commandIdentity, fs: fsApi = nodeFs }) {
+  const configPath = configPathFor(codexHome);
+  try {
+    assertCodexHomeSafe(codexHome, fsApi);
+    const target = identityValue(commandIdentity);
+    if (!target) throw new TypeError('commandIdentity is required');
+    const document = readConfig(configPath, fsApi);
+    if (!document.exists || !containsCommand(document.value, target)) return hookState(configPath, false);
+    const value = structuredClone(document.value);
+    value.hooks.Stop = value.hooks.Stop.flatMap((group) => {
+      if (!Array.isArray(group?.hooks)) return [group];
+      const hooks = group.hooks.filter((entry) => commandValue(entry) !== target);
+      if (hooks.length === 0) return [];
+      return [{ ...group, hooks }];
+    });
+    writeAtomic(configPath, value, fsApi);
+    return hookState(configPath, false);
+  } catch (error) {
+    return hookState(configPath, false, null, error.message || String(error));
+  }
+}
+
+module.exports = {
+  disableCodexStopHook,
+  enableCodexStopHook,
+  readCodexHookState
+};

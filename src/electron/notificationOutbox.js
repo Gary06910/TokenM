@@ -1,0 +1,200 @@
+'use strict';
+
+const { completionEventForWire } = require('../shared/codexCompletion');
+const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../shared/credentialStore');
+
+const VERSION = 1;
+const BASE_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 15 * 60 * 1_000;
+const MAX_ITEMS = 1_000;
+
+function timestamp(value) {
+  const result = value instanceof Date ? value.getTime() : Number(value);
+  if (!Number.isFinite(result)) throw new TypeError('now() must return a finite timestamp');
+  return result;
+}
+
+function errorCode(error, status) {
+  if (typeof error?.code === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(error.code)) return error.code;
+  return status ? `http_${status}` : 'network_error';
+}
+
+function responseStatus(value, error) {
+  const candidate = error?.status ?? value?.status;
+  return Number.isInteger(candidate) ? candidate : null;
+}
+
+function classify(value, error) {
+  const status = responseStatus(value, error);
+  if (!error && (status === null || (status >= 200 && status < 300))) return { kind: 'success', status };
+  if (status === 401 || status === 403) return { kind: 'credential', status };
+  if ([400, 404, 413, 422].includes(status)) return { kind: 'terminal', status };
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status) || status === null) {
+    return { kind: 'retry', status };
+  }
+  if (status >= 500) return { kind: 'retry', status };
+  return { kind: 'terminal', status };
+}
+
+function normalizeDocument(value) {
+  if (!value || typeof value !== 'object' || value.version !== VERSION || !Array.isArray(value.items)) {
+    throw new Error('Unsupported notification outbox document');
+  }
+  if (value.items.length > MAX_ITEMS) throw new Error('Notification outbox is too large');
+  return {
+    version: VERSION,
+    items: value.items.map((item) => ({
+      event: completionEventForWire(item.event),
+      attemptCount: Number.isSafeInteger(item.attemptCount) && item.attemptCount >= 0 ? item.attemptCount : 0,
+      nextAttemptAt: Number.isFinite(item.nextAttemptAt) ? item.nextAttemptAt : 0,
+      lastError: typeof item.lastError === 'string' ? item.lastError.slice(0, 80) : null,
+      suspended: ['credential', 'terminal'].includes(item.suspended) ? item.suspended : null
+    }))
+  };
+}
+
+function createNotificationOutbox({ filePath, send, now = Date.now, random = Math.random, logger = {} }) {
+  if (typeof filePath !== 'string' || !filePath) throw new TypeError('filePath is required');
+  if (typeof send !== 'function') throw new TypeError('send is required');
+  let document = { version: VERSION, items: [] };
+  let loaded = false;
+  let running = false;
+  let timer = null;
+  let lane = Promise.resolve();
+
+  function currentTime() {
+    return timestamp(now());
+  }
+
+  function load() {
+    if (loaded) return;
+    try {
+      const raw = readRegularFileNoFollow(filePath, {
+        description: 'Notification outbox',
+        encoding: 'utf8',
+        maxBytes: 4 * 1024 * 1024,
+        mode: 0o600
+      });
+      document = normalizeDocument(JSON.parse(raw));
+      loaded = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      loaded = true;
+    }
+  }
+
+  function persist() {
+    writePrivateJsonAtomic(filePath, document);
+  }
+
+  function publicSnapshot() {
+    const firstError = document.items.find((item) => item.lastError)?.lastError || null;
+    return {
+      pending: document.items.length,
+      lastError: firstError,
+      items: document.items.map((item) => ({
+        eventId: item.event.eventId,
+        attemptCount: item.attemptCount,
+        nextAttemptAt: item.nextAttemptAt,
+        lastError: item.lastError,
+        suspended: item.suspended
+      }))
+    };
+  }
+
+  function clearTimer() {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  }
+
+  function schedule() {
+    clearTimer();
+    if (!running) return;
+    const eligible = document.items.filter((item) => !item.suspended);
+    if (eligible.length === 0) return;
+    const earliest = Math.min(...eligible.map((item) => item.nextAttemptAt));
+    timer = setTimeout(() => {
+      timer = null;
+      api.flush().catch((error) => logger.warn?.('Notification outbox flush failed', { code: errorCode(error) }));
+    }, Math.max(0, earliest - currentTime()));
+    timer.unref?.();
+  }
+
+  async function flushDue() {
+    load();
+    while (true) {
+      const index = document.items.findIndex((item) => !item.suspended && item.nextAttemptAt <= currentTime());
+      if (index < 0) break;
+      const item = document.items[index];
+      let result;
+      let failure;
+      try {
+        result = await send(completionEventForWire(item.event));
+      } catch (error) {
+        failure = error;
+      }
+      const outcome = classify(result, failure);
+      if (outcome.kind === 'success') {
+        document.items.splice(index, 1);
+      } else {
+        item.attemptCount += 1;
+        item.lastError = errorCode(failure, outcome.status);
+        if (outcome.kind === 'retry') {
+          const nominal = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * (2 ** Math.min(20, item.attemptCount - 1)));
+          const randomValue = Number(random());
+          const boundedRandom = Number.isFinite(randomValue) ? Math.max(0, Math.min(1, randomValue)) : 0.5;
+          const jittered = Math.round(nominal * (0.75 + boundedRandom * 0.5));
+          item.nextAttemptAt = currentTime() + Math.min(MAX_DELAY_MS, jittered);
+          persist();
+          continue;
+        }
+        item.suspended = outcome.kind;
+      }
+      persist();
+    }
+    schedule();
+    return publicSnapshot();
+  }
+
+  const api = {
+    enqueue(event) {
+      lane = lane.then(() => {
+        load();
+        const clean = completionEventForWire(event);
+        if (!document.items.some((item) => item.event.eventId === clean.eventId)) {
+          if (document.items.length >= MAX_ITEMS) throw new Error('Notification outbox is full');
+          document.items.push({ event: clean, attemptCount: 0, nextAttemptAt: currentTime(), lastError: null, suspended: null });
+          persist();
+        }
+        schedule();
+        return publicSnapshot();
+      });
+      return lane;
+    },
+    start() {
+      running = true;
+      lane = lane.then(() => {
+        load();
+        schedule();
+        return publicSnapshot();
+      });
+      return lane;
+    },
+    flush() {
+      lane = lane.then(flushDue);
+      return lane;
+    },
+    stop() {
+      running = false;
+      clearTimer();
+      return lane;
+    },
+    snapshot() {
+      load();
+      return publicSnapshot();
+    }
+  };
+  return api;
+}
+
+module.exports = { createNotificationOutbox };
