@@ -17,6 +17,21 @@
       },
       "PUBLIC_STATS_ENABLED": {
         "description": "Optional. Set to 1 to expose the unauthenticated GET /api/public/stats endpoint. Leave blank to keep it off."
+      },
+      "TOKEN_M_ENROLLMENT_SECRET": {
+        "description": "Required for managed notifications. Private capability used only to create a new tenant."
+      },
+      "TOKEN_M_CREDENTIAL_PEPPER": {
+        "description": "Required for managed notifications. HMAC pepper used to verify scoped device and mobile credentials."
+      },
+      "TOKEN_M_VAPID_PRIVATE_KEY": {
+        "description": "Required for Web Push. URL-safe P-256 private key; configure as a Worker secret."
+      },
+      "TOKEN_M_VAPID_SUBJECT": {
+        "description": "Required for Web Push. mailto: or https: operator contact."
+      },
+      "TOKEN_M_VAPID_PUBLIC_KEY": {
+        "description": "Required for Web Push. Public URL-safe uncompressed P-256 key returned to paired clients."
       }
     }
   },
@@ -33,5 +48,8 @@
   },
   "devDependencies": {
     "wrangler": "^4.118.0"
+  },
+  "dependencies": {
+    "@block65/webcrypto-web-push": "^1.0.2"
   }
 }

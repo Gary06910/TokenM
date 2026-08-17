@@ -16,3 +16,13 @@ TOKEN_MONITOR_SECRET=
 # Optional. Set to 1 to expose the unauthenticated GET /api/public/stats
 # endpoint (device records and account identifiers are stripped). Blank = off.
 PUBLIC_STATS_ENABLED=
+
+# Required for the private-beta managed notification API. Keep every value
+# except the public key secret in production (`wrangler secret put <NAME>`).
+TOKEN_M_ENROLLMENT_SECRET=
+TOKEN_M_CREDENTIAL_PEPPER=
+TOKEN_M_VAPID_PRIVATE_KEY=
+TOKEN_M_VAPID_SUBJECT=mailto:operator@example.com
+
+# Public URL-safe uncompressed P-256 VAPID key, paired with the private key.
+TOKEN_M_VAPID_PUBLIC_KEY=

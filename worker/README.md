@@ -68,6 +68,24 @@ npm run dev   # wrangler dev — local Worker with a real Durable Object
 Endpoints work the same as in production. Use a separate dev secret with
 `wrangler secret put TOKEN_MONITOR_SECRET --env dev` if needed.
 
+### Managed Token M notifications
+
+The `/v1` API uses a separate SQLite-backed `TenantDO` namespace and never
+accepts the legacy hub secret. Before enabling private-beta enrollment, set:
+
+```bash
+npx wrangler secret put TOKEN_M_ENROLLMENT_SECRET
+npx wrangler secret put TOKEN_M_CREDENTIAL_PEPPER
+npx wrangler secret put TOKEN_M_VAPID_PRIVATE_KEY
+npx wrangler secret put TOKEN_M_VAPID_SUBJECT
+```
+
+Set `TOKEN_M_VAPID_PUBLIC_KEY` as a normal Worker variable. The VAPID keys are
+the URL-safe P-256 values paired with each other; the subject is a `mailto:` or
+`https:` operator contact. Managed desktop and phone credentials are scoped to
+one tenant and cannot authorize any legacy `/api/*` route. Static PWA files in
+`public/` are served through the `ASSETS` binding on the same HTTPS origin.
+
 ## Configure the widget
 
 Settings → Multi-device Sync:
