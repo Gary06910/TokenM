@@ -1,7 +1,8 @@
 # Token M 微信小程序 Handoff Recovery
 
-审计日期：2026-08-20  
-审计分支：`main`  
+审计日期：2026-08-20
+
+审计分支：`main`
 审计原则：以当前 Git / filesystem / worktree 实际状态为准；未执行 reset、clean、stash、checkout 覆盖或删除。
 
 ## 1. Previous architecture commit
