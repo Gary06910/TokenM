@@ -31,12 +31,28 @@ function windowsQuote(value) {
   return `"${String(value).replaceAll('"', '\\"')}"`;
 }
 
+function legacyWindowsHookCommandFor({ executablePath, helperPath, runtimePath }) {
+  return `set "ELECTRON_RUN_AS_NODE=1"&&${windowsQuote(executablePath)} ${windowsQuote(helperPath)} ${windowsQuote(runtimePath)}`;
+}
+
 function hookCommandFor({ platform = process.platform, executablePath = process.execPath, helperPath, runtimePath }) {
   if (![executablePath, helperPath, runtimePath].every((value) => typeof value === 'string' && path.isAbsolute(value))) {
     throw new TypeError('Hook command paths must be absolute');
   }
   if (platform === 'win32') {
-    return `set "ELECTRON_RUN_AS_NODE=1"&&${windowsQuote(executablePath)} ${windowsQuote(helperPath)} ${windowsQuote(runtimePath)}`;
+    const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+    const script = [
+      "$ProgressPreference = 'SilentlyContinue'",
+      '$utf8 = [System.Text.UTF8Encoding]::new($false)',
+      '[Console]::InputEncoding = $utf8',
+      '$OutputEncoding = $utf8',
+      '$payload = [Console]::In.ReadToEnd()',
+      "$env:ELECTRON_RUN_AS_NODE = '1'",
+      `$payload | & ${quote(executablePath)} ${quote(helperPath)} ${quote(runtimePath)}`,
+      'exit $LASTEXITCODE'
+    ].join('; ');
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text -EncodedCommand ${encoded}`;
   }
   return `ELECTRON_RUN_AS_NODE=1 ${posixQuote(executablePath)} ${posixQuote(helperPath)} ${posixQuote(runtimePath)}`;
 }
@@ -92,6 +108,11 @@ function createTokenMNotificationRuntime(options) {
   const runtimePath = path.join(userDataPath, 'token-m-notification-runtime.json');
   const outboxPath = path.join(userDataPath, 'token-m-notification-outbox.json');
   const command = hookCommandFor({ platform, executablePath, helperPath, runtimePath });
+  const commandWindows = platform === 'win32' ? command : null;
+  const legacyCommands = platform === 'win32'
+    ? [legacyWindowsHookCommandFor({ executablePath, helperPath, runtimePath })]
+    : [];
+  const commandIdentity = { command, commandWindows, legacyCommands };
   let bridge = null;
   let outbox = null;
   let cloud = null;
@@ -125,7 +146,7 @@ function createTokenMNotificationRuntime(options) {
   }
 
   function hookState() {
-    return readCodexHookState({ codexHome, commandIdentity: command });
+    return readCodexHookState({ codexHome, commandIdentity });
   }
 
   function publicStatus() {
@@ -323,7 +344,7 @@ function createTokenMNotificationRuntime(options) {
         if (!currentConfiguration().configured && !wechat.configuration().configured) {
           throw new Error('notifications_not_configured');
         }
-        const state = enableCodexStopHook({ codexHome, command, commandWindows: command });
+        const state = enableCodexStopHook({ codexHome, command, commandWindows, legacyCommands });
         if (state.enabled) {
           await commitSettings({ tokenMCodexHookEnabled: true });
           await startBridge();
@@ -334,7 +355,7 @@ function createTokenMNotificationRuntime(options) {
     },
     disableCodexHook() {
       return inLifecycle(async () => {
-        const state = disableCodexStopHook({ codexHome, commandIdentity: command });
+        const state = disableCodexStopHook({ codexHome, commandIdentity });
         if (!state.error) await commitSettings({ tokenMCodexHookEnabled: false });
         const activeBridge = bridge;
         bridge = null;
@@ -409,5 +430,6 @@ function createTokenMNotificationRuntime(options) {
 module.exports = {
   createTokenMNotificationRuntime,
   hookCommandFor,
+  legacyWindowsHookCommandFor,
   sanitizeInstallations
 };
