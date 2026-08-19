@@ -23,3 +23,6 @@ worker/.wrangler/
 worker/node_modules/
 worker/.dev.vars
 devlog/
+
+# WeChat DevTools machine-local configuration (copy from the tracked example).
+wechat-miniapp/project.private.config.json

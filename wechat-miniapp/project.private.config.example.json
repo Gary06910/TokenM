@@ -1,0 +1,9 @@
+{
+  "description": "复制为 project.private.config.json 后填写真实 AppID；不要提交复制后的文件",
+  "appid": "",
+  "projectname": "token-m-wechat-miniapp-local",
+  "setting": {
+    "compileHotReLoad": true
+  },
+  "condition": {}
+}

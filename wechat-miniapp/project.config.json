@@ -1,0 +1,24 @@
+{
+  "description": "Token M 微信小程序公共项目配置；AppID 由本机私有配置注入",
+  "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "projectname": "token-m-wechat-miniapp",
+  "compileType": "miniprogram",
+  "libVersion": "trial",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "coverView": true,
+    "showShadowRootInWxmlPanel": true,
+    "packNpmManually": false,
+    "ignoreUploadUnusedFiles": true
+  },
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "condition": {}
+}

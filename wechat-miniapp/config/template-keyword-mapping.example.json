@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "templateId": "",
+  "fields": {
+    "completionStatus": {
+      "keyword": "",
+      "type": "thing",
+      "source": "completionStatus",
+      "maxChars": 20,
+      "required": true
+    },
+    "completedAt": {
+      "keyword": "",
+      "type": "time",
+      "source": "completedAt",
+      "required": true
+    },
+    "desktopName": {
+      "keyword": "",
+      "type": "thing",
+      "source": "desktopName",
+      "maxChars": 20,
+      "required": false
+    }
+  }
+}

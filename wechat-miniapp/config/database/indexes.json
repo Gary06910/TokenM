@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "indexes": [
+    { "collection": "users", "name": "status_updatedAt", "fields": [{ "field": "status", "order": "asc" }, { "field": "updatedAt", "order": "asc" }] },
+    { "collection": "desktops", "name": "ownerId_status_createdAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "status", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "desktops", "name": "status_lastSeenAt", "fields": [{ "field": "status", "order": "asc" }, { "field": "lastSeenAt", "order": "asc" }] },
+    { "collection": "pairingSessions", "name": "ownerId_status_createdAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "status", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "pairingSessions", "name": "status_expiresAt", "fields": [{ "field": "status", "order": "asc" }, { "field": "expiresAt", "order": "asc" }] },
+    { "collection": "tasks", "name": "ownerId_occurredAt_id", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "occurredAt", "order": "desc" }, { "field": "_id", "order": "desc" }] },
+    { "collection": "tasks", "name": "ownerId_desktopId_occurredAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "desktopId", "order": "asc" }, { "field": "occurredAt", "order": "desc" }] },
+    { "collection": "tasks", "name": "ownerId_notificationStatus_occurredAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "notificationStatus", "order": "asc" }, { "field": "occurredAt", "order": "desc" }] },
+    { "collection": "subscriptionGrants", "name": "ownerId_status_createdAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "status", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "subscriptionGrants", "name": "status_expiresAt", "fields": [{ "field": "status", "order": "asc" }, { "field": "expiresAt", "order": "asc" }] },
+    { "collection": "notificationDeliveries", "name": "ownerId_createdAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "notificationDeliveries", "name": "status_updatedAt", "fields": [{ "field": "status", "order": "asc" }, { "field": "updatedAt", "order": "asc" }] },
+    { "collection": "notificationDeliveries", "name": "taskId", "fields": [{ "field": "taskId", "order": "asc" }] },
+    { "collection": "securityEvents", "name": "type_createdAt", "fields": [{ "field": "type", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "securityEvents", "name": "ownerId_createdAt", "fields": [{ "field": "ownerId", "order": "asc" }, { "field": "createdAt", "order": "desc" }] },
+    { "collection": "securityEvents", "name": "createdAt", "fields": [{ "field": "createdAt", "order": "asc" }] },
+    { "collection": "rateLimits", "name": "expiresAt", "fields": [{ "field": "expiresAt", "order": "asc" }] }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    { "collection": "users", "file": "rules/users.json" },
+    { "collection": "desktops", "file": "rules/desktops.json" },
+    { "collection": "pairingSessions", "file": "rules/pairingSessions.json" },
+    { "collection": "tasks", "file": "rules/tasks.json" },
+    { "collection": "notificationState", "file": "rules/notificationState.json" },
+    { "collection": "subscriptionGrants", "file": "rules/subscriptionGrants.json" },
+    { "collection": "notificationDeliveries", "file": "rules/notificationDeliveries.json" },
+    { "collection": "securityEvents", "file": "rules/securityEvents.json" },
+    { "collection": "rateLimits", "file": "rules/rateLimits.json" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "environmentId": "",
+  "miniprogramState": "",
+  "function": {
+    "name": "tokenm-api",
+    "source": "../cloudfunctions/tokenm-api",
+    "installCommand": "npm ci --omit=dev",
+    "deploymentMode": "cloud-install-dependencies",
+    "openapiConfig": "../cloudfunctions/tokenm-api/config.json",
+    "environmentTemplate": "cloudfunction.env.example.json"
+  },
+  "database": {
+    "collections": "database/collections.json",
+    "indexes": "database/indexes.json",
+    "rules": "database/rules-manifest.json"
+  },
+  "httpGateway": {
+    "publicOrigin": "",
+    "triggerPath": "/",
+    "desktopApiPrefix": "/v1/desktop",
+    "httpsOnly": true
+  }
+}

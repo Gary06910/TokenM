@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "collections": [
+    { "name": "users", "clientAccess": "deny" },
+    { "name": "desktops", "clientAccess": "deny" },
+    { "name": "pairingSessions", "clientAccess": "deny" },
+    { "name": "tasks", "clientAccess": "deny" },
+    { "name": "notificationState", "clientAccess": "deny" },
+    { "name": "subscriptionGrants", "clientAccess": "deny" },
+    { "name": "notificationDeliveries", "clientAccess": "deny" },
+    { "name": "securityEvents", "clientAccess": "deny" },
+    { "name": "rateLimits", "clientAccess": "deny" }
+  ]
+}

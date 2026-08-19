@@ -1,0 +1,6 @@
+{
+  "description": "synthetic invalid fixture",
+  "miniprogramRoot": "C:/synthetic/miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "compileType": "miniprogram"
+}
