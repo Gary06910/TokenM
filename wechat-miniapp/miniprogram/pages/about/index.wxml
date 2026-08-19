@@ -1,0 +1,12 @@
+<view class="page page-secondary">
+  <tm-header title="关于 Token M" back />
+  <view class="about-mark">TM</view>
+  <view class="about-title">Token M</view>
+  <view class="about-copy">Token M 用于记录 Codex 完成事件，并在你主动授予通知额度后发送微信提醒。</view>
+  <view class="surface detail-list section">
+    <view class="detail-row"><view class="detail-key">版本</view><view class="detail-value">{{version}}</view></view>
+    <view class="detail-row"><view class="detail-key">声明</view><view class="detail-value">Token M 不是微信官方产品，也不承诺每条提醒必然送达。</view></view>
+    <view wx:if="{{contactText}}" class="detail-row row-press" bindtap="copyContact"><view class="detail-key">联系</view><view class="detail-value">{{contactText}}</view></view>
+    <view wx:else class="detail-row"><view class="detail-key">联系</view><view class="detail-value muted">部署者尚未配置联系信息</view></view>
+  </view>
+</view>

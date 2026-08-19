@@ -1,0 +1,15 @@
+.onboarding { display: flex; min-height: 72vh; flex-direction: column; justify-content: center; padding: 32rpx 0 56rpx; }
+.brand { margin-bottom: 16rpx; color: #69a5ff; font-size: 26rpx; font-weight: 600; }
+.onboarding-title { max-width: 620rpx; color: #f2f7ff; font-size: 52rpx; font-weight: 700; line-height: 1.18; }
+.onboarding-copy { max-width: 620rpx; margin: 28rpx 0 40rpx; color: #b4c2d4; font-size: 28rpx; line-height: 1.65; }
+.privacy-link { min-height: 88rpx; margin-top: 12rpx; padding: 0; color: #7f91a7; background: transparent; font-size: 24rpx; line-height: 88rpx; text-align: center; }
+.quota { display: flex; align-items: center; gap: 24rpx; margin-top: 24rpx; padding: 28rpx; }
+.quota-copy { min-width: 0; flex: 1; }
+.metric { font-size: 64rpx; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.metric-unit { color: #b4c2d4; font-size: 28rpx; }
+.quota-action { flex: none; min-height: 88rpx; padding: 0 24rpx; border-radius: 16rpx; color: #f2f7ff; background: #3f86ff; font-size: 26rpx; font-weight: 600; line-height: 88rpx; }
+.quota-action:active { background: #2f6fd8; transform: scale(.985); }
+.summary-line { display: flex; flex-wrap: wrap; align-items: center; gap: 12rpx; margin-top: 32rpx; color: #b4c2d4; font-size: 26rpx; }
+.summary-divider { color: #315071; }
+.plain-list { padding: 0 8rpx; }
+@media (max-width: 340px) { .quota { align-items: stretch; flex-direction: column; } .quota-action { width: 100%; } }

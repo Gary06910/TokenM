@@ -1,0 +1,27 @@
+<view class="page page-secondary">
+  <tm-header title="绑定电脑" back action-text="添加" bind:action="goPairing" />
+  <view wx:if="{{banner}}" class="banner"><text class="banner-text">{{banner}}</text><button class="text-button" bindtap="loadDesktops">重试</button></view>
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入电脑" detail="{{error.message}}" action-text="重试" bind:action="loadDesktops" />
+  <ui-state wx:elif="{{active.length === 0}}" mode="empty" title="还没有绑定电脑" detail="生成配对码后，在 Token M Desktop 中完成绑定。" action-text="生成配对码" bind:action="goPairing" />
+  <block wx:else>
+    <view class="desktop-list">
+      <view wx:for="{{active}}" wx:key="desktopId" class="desktop surface">
+        <view class="desktop-head"><view class="row-main"><view class="row-title">{{item.name}}</view><view class="status status-success"><text class="status-dot"></text><text>已连接</text></view></view></view>
+        <view class="row-meta">{{item.lastSeenLabel}}</view>
+        <view class="row-meta">{{item.lastEventLabel}}</view>
+        <view class="desktop-actions">
+          <button class="small-action" data-id="{{item.desktopId}}" bindtap="rename">重命名</button>
+          <button class="small-action danger" data-id="{{item.desktopId}}" bindtap="unbind">解绑</button>
+        </view>
+      </view>
+    </view>
+    <button class="btn btn-primary section" bindtap="goPairing">绑定另一台电脑</button>
+  </block>
+  <view wx:if="{{revoked.length}}" class="section">
+    <button class="revoked-toggle" bindtap="toggleRevoked">{{showRevoked ? '收起' : '查看'}}已解绑电脑（{{revoked.length}}）</button>
+    <view wx:if="{{showRevoked}}" class="revoked-list">
+      <view wx:for="{{revoked}}" wx:key="desktopId" class="row"><view class="row-main"><view class="row-title">{{item.name}}</view><view class="row-meta">已解绑</view></view></view>
+    </view>
+  </view>
+</view>

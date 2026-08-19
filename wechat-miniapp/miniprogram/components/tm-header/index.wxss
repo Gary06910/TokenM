@@ -1,0 +1,5 @@
+.header { display: flex; min-height: 88rpx; align-items: center; justify-content: space-between; gap: 12rpx; }
+.header-title { min-width: 0; flex: 1; overflow: hidden; color: #f2f7ff; font-size: 32rpx; font-weight: 650; line-height: 1.4; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.header-control, .header-spacer { box-sizing: border-box; width: 88rpx; min-width: 88rpx; height: 88rpx; padding: 22rpx; background: transparent; }
+.header-icon { width: 44rpx; height: 44rpx; }
+.header-action { min-width: 88rpx; min-height: 88rpx; padding: 0 8rpx; color: #69a5ff; background: transparent; font-size: 26rpx; line-height: 88rpx; }

@@ -1,0 +1,22 @@
+<view class="page page-secondary">
+  <tm-header title="数据与隐私" back />
+  <view class="section">
+    <view class="section-title">隐私模式</view>
+    <view class="privacy-copy">仅上传完成事件、电脑标识、匿名会话标识和时间；不上传 prompt、完整对话、工作目录、源代码或 Codex 最终回复。</view>
+  </view>
+  <view class="section">
+    <view class="section-title">完整模式</view>
+    <view class="privacy-copy">可上传项目名称、模型和最多 600 字的任务结果摘要；仍不上传完整聊天记录或源代码。请只在你接受这些内容进入云端时开启。</view>
+  </view>
+  <view class="section surface detail-list">
+    <view class="detail-row"><view class="detail-key">保存内容</view><view class="detail-value">账户、电脑、完成记录、通知额度与发送状态</view></view>
+    <view class="detail-row"><view class="detail-key">用途</view><view class="detail-value">展示任务记录、绑定电脑并发送你主动授权的微信提醒</view></view>
+    <view class="detail-row"><view class="detail-key">存储</view><view class="detail-value">微信云开发 CloudBase</view></view>
+    <view class="detail-row"><view class="detail-key">保留</view><view class="detail-value">任务与发送记录默认保留 90 天；失效配对会话与安全记录按服务策略清理</view></view>
+  </view>
+  <view class="section danger-zone">
+    <view class="section-title">管理数据</view>
+    <button class="btn btn-danger" disabled="{{working}}" bindtap="clearHistory">清除任务记录</button>
+    <button class="btn btn-danger" disabled="{{working}}" bindtap="deleteAccount">删除账户</button>
+  </view>
+</view>

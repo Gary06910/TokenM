@@ -1,0 +1,9 @@
+.pair-surface { margin-top: 32rpx; padding: 40rpx 24rpx; text-align: center; }
+.pair-label { color: #b4c2d4; font-size: 26rpx; }
+.pair-code { display: block; margin-top: 20rpx; color: #f2f7ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: 48rpx; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: 8rpx; line-height: 1.1; white-space: nowrap; }
+.pair-time { margin-top: 20rpx; color: #69a5ff; font-size: 24rpx; font-variant-numeric: tabular-nums; }
+.pair-expired { opacity: .48; }
+.step { display: flex; min-height: 88rpx; align-items: center; gap: 20rpx; border-bottom: 1rpx solid #20344d; color: #b4c2d4; }
+.step-number { display: flex; width: 48rpx; height: 48rpx; flex: none; align-items: center; justify-content: center; border: 1rpx solid #315071; border-radius: 50%; color: #69a5ff; font-size: 24rpx; }
+.back-list { width: 100%; min-height: 88rpx; margin-top: 24rpx; color: #7f91a7; background: transparent; font-size: 26rpx; line-height: 88rpx; }
+@media (max-width: 340px) { .pair-code { letter-spacing: 4rpx; } }

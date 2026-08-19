@@ -1,0 +1,11 @@
+<view wx:if="{{mode === 'loading'}}" class="skeleton {{compact ? 'compact' : ''}}" aria-label="正在加载">
+  <view class="skeleton-line skeleton-title"></view>
+  <view class="skeleton-line"></view>
+  <view class="skeleton-line skeleton-short"></view>
+</view>
+<view wx:else class="state {{compact ? 'compact' : ''}}">
+  <image class="state-icon" src="{{mode === 'error' ? '/assets/warning.svg' : '/assets/empty.svg'}}" mode="aspectFit" aria-hidden="true" />
+  <view class="state-title">{{title}}</view>
+  <view wx:if="{{detail}}" class="state-detail">{{detail}}</view>
+  <button wx:if="{{actionText}}" class="state-action" bindtap="onAction">{{actionText}}</button>
+</view>

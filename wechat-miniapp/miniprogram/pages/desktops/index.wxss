@@ -1,0 +1,9 @@
+.desktop-list { margin-top: 24rpx; }
+.desktop { margin-bottom: 20rpx; padding: 24rpx; }
+.desktop-head { display: flex; align-items: center; margin-bottom: 10rpx; }
+.desktop-head .status { margin-top: 6rpx; }
+.desktop-actions { display: flex; gap: 16rpx; margin-top: 20rpx; padding-top: 12rpx; border-top: 1rpx solid #20344d; }
+.small-action { min-width: 0; min-height: 88rpx; flex: 1; color: #69a5ff; background: transparent; font-size: 26rpx; line-height: 88rpx; }
+.small-action.danger { color: #ff9aa7; }
+.revoked-toggle { width: 100%; min-height: 88rpx; color: #7f91a7; background: transparent; font-size: 24rpx; line-height: 88rpx; }
+.revoked-list { padding: 0 8rpx; }

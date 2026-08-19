@@ -1,0 +1,9 @@
+{
+  "enablePullDownRefresh": true,
+  "onReachBottomDistance": 160,
+  "backgroundColor": "#07111f",
+  "usingComponents": {
+    "tm-header": "/components/tm-header/index",
+    "ui-state": "/components/ui-state/index"
+  }
+}

@@ -1,0 +1,21 @@
+<view class="page">
+  <tm-header title="设置" />
+  <view wx:if="{{banner}}" class="banner"><text class="banner-text">{{banner}}</text><button class="text-button" bindtap="loadSettings">重试</button></view>
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入设置" detail="{{error.message}}" action-text="重试" bind:action="loadSettings" />
+  <block wx:else>
+    <view class="section">
+      <view class="setting-row">
+        <view class="row-main"><view class="row-title">任务通知</view><view class="row-meta">关闭后，新任务仍会保存，但不发送微信提醒。</view></view>
+        <switch checked="{{notificationsEnabled}}" disabled="{{updating}}" color="#3f86ff" bindchange="toggleNotifications" aria-label="任务通知开关" />
+      </view>
+    </view>
+    <view class="notice section">Desktop 默认仅上传完成事件。完整模式需要你在 Desktop 中主动开启，小程序不会代替你切换上传模式。</view>
+    <view class="section settings-list">
+      <view class="setting-link row-press" bindtap="goQuota"><view class="row-main"><view class="row-title">通知额度</view><view class="row-meta">查看并补充单次通知授权</view></view><image src="/assets/chevron-right.svg" class="chevron" mode="aspectFit" /></view>
+      <view class="setting-link row-press" bindtap="goDesktops"><view class="row-main"><view class="row-title">绑定电脑</view><view class="row-meta">重命名、解绑或添加电脑</view></view><image src="/assets/chevron-right.svg" class="chevron" mode="aspectFit" /></view>
+      <view class="setting-link row-press" bindtap="goPrivacy"><view class="row-main"><view class="row-title">数据与隐私</view><view class="row-meta">查看数据清单并管理账户数据</view></view><image src="/assets/chevron-right.svg" class="chevron" mode="aspectFit" /></view>
+      <view class="setting-link row-press" bindtap="goAbout"><view class="row-main"><view class="row-title">关于 Token M</view><view class="row-meta">用途、版本与联系信息</view></view><image src="/assets/chevron-right.svg" class="chevron" mode="aspectFit" /></view>
+    </view>
+  </block>
+</view>

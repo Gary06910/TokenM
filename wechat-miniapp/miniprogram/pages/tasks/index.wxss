@@ -1,0 +1,7 @@
+.task-list { margin-top: 16rpx; }
+.task-row { min-height: 126rpx; padding: 24rpx 8rpx; border-bottom: 1rpx solid #20344d; }
+.task-top, .task-bottom { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; }
+.task-bottom { margin-top: 10rpx; }
+.task-bottom .status { min-width: 0; }
+.pagination-error { display: flex; min-height: 120rpx; align-items: center; justify-content: center; gap: 8rpx; color: #b4c2d4; font-size: 24rpx; }
+.list-footer { padding: 32rpx 0; color: #7f91a7; font-size: 24rpx; text-align: center; }

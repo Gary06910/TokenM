@@ -1,0 +1,22 @@
+<view class="page page-secondary">
+  <tm-header title="配对码" back />
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法生成配对码" detail="{{error.message}}" action-text="重试" bind:action="createCode" />
+  <block wx:else>
+    <view wx:if="{{paired}}" class="notice notice-success">电脑已绑定。你现在可以返回电脑列表查看连接状态。</view>
+    <view class="pair-surface surface {{expired ? 'pair-expired' : ''}}">
+      <view class="pair-label">在 Token M Desktop 中输入</view>
+      <text class="pair-code" selectable>{{displayCode}}</text>
+      <view class="pair-time">{{expired ? '配对码已失效' : countdown + ' 后失效'}}</view>
+    </view>
+    <button class="btn btn-primary section" disabled="{{expired || paired}}" bindtap="copyCode">复制配对码</button>
+    <button class="btn btn-secondary" bindtap="refreshCode">刷新配对码</button>
+    <view class="section steps">
+      <view class="section-title">如何绑定</view>
+      <view class="step"><text class="step-number">1</text><text>打开 Token M Desktop 设置</text></view>
+      <view class="step"><text class="step-number">2</text><text>进入“微信通知”</text></view>
+      <view class="step"><text class="step-number">3</text><text>输入这组 6 位配对码</text></view>
+    </view>
+    <button class="back-list" bindtap="goDesktops">返回电脑列表</button>
+  </block>
+</view>

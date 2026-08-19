@@ -1,0 +1,56 @@
+<view class="page">
+  <tm-header title="Token M" action-text="设置" bind:action="goSettings" />
+  <view wx:if="{{banner}}" class="banner"><text class="banner-text">{{banner}}</text><button class="text-button" bindtap="loadDashboard">重试</button></view>
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入首页" detail="{{error.message}}" action-text="重试" bind:action="loadDashboard" />
+
+  <block wx:elif="{{dashboard.desktopCount === 0}}">
+    <view class="onboarding">
+      <view class="brand">Token M</view>
+      <view class="onboarding-title">Codex 完成时，让微信告诉你。</view>
+      <view class="onboarding-copy">绑定 Token M Desktop 后，任务记录会保存在你的账户；有通知额度时，再发送微信提醒。</view>
+      <button class="btn btn-primary" bindtap="goPairing">绑定电脑</button>
+      <button class="btn btn-secondary" bindtap="goQuota">开启任务通知</button>
+      <button class="privacy-link" bindtap="goPrivacy">默认使用隐私模式 · 了解详情</button>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="quota surface">
+      <view class="quota-copy">
+        <view><text class="metric">{{dashboard.quota.available}}</text><text class="metric-unit"> 次</text></view>
+        <view class="status status-{{dashboard.quota.tone}}"><text class="status-dot"></text><text>{{dashboard.quota.label}} · {{dashboard.quota.notice}}</text></view>
+      </view>
+      <button class="quota-action" bindtap="goQuota">补充 1 次</button>
+    </view>
+
+    <view class="summary-line">
+      <text>今日完成 {{dashboard.todayCompletedCount}} 个任务</text>
+      <text class="summary-divider">·</text>
+      <text>{{dashboard.desktopCount}} 台电脑已绑定</text>
+    </view>
+
+    <view class="section">
+      <view class="section-head"><view class="section-title">电脑</view><button class="section-link" bindtap="goDesktops">查看全部</button></view>
+      <view wx:if="{{desktops.length}}" class="plain-list">
+        <view wx:for="{{desktops}}" wx:key="desktopId" class="row">
+          <view class="status status-success"><text class="status-dot"></text></view>
+          <view class="row-main"><view class="row-title">{{item.name}}</view><view class="row-meta">{{item.lastEventLabel}}</view></view>
+          <view class="row-side">{{item.statusLabel}}</view>
+        </view>
+      </view>
+      <ui-state wx:else mode="empty" compact title="暂时没有可显示的电脑" action-text="查看电脑" bind:action="goDesktops" />
+    </view>
+
+    <view class="section">
+      <view class="section-head"><view class="section-title">最近任务</view><button class="section-link" bindtap="goTasks">查看全部</button></view>
+      <view wx:if="{{dashboard.recentTasks.length}}" class="plain-list">
+        <view wx:for="{{dashboard.recentTasks}}" wx:key="taskId" class="row row-press" data-id="{{item.taskId}}" bindtap="openTask">
+          <view class="row-main"><view class="row-title">{{item.title}}</view><view class="row-meta">{{item.desktop.name}} · {{item.notificationLabel}}</view></view>
+          <view class="row-side">{{item.relativeTime}}</view>
+        </view>
+      </view>
+      <ui-state wx:else mode="empty" compact title="还没有完成记录" detail="完成一次 Codex 任务后，它会出现在这里。" />
+    </view>
+  </block>
+</view>

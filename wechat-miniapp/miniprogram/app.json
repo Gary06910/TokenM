@@ -1,0 +1,32 @@
+{
+  "pages": [
+    "pages/dashboard/index",
+    "pages/tasks/index",
+    "pages/settings/index",
+    "pages/task-detail/index",
+    "pages/desktops/index",
+    "pages/pairing/index",
+    "pages/quota/index",
+    "pages/privacy/index",
+    "pages/about/index"
+  ],
+  "window": {
+    "navigationStyle": "custom",
+    "backgroundColor": "#07111f",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#7f91a7",
+    "selectedColor": "#69a5ff",
+    "backgroundColor": "#0a1727",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/dashboard/index", "text": "首页" },
+      { "pagePath": "pages/tasks/index", "text": "任务" },
+      { "pagePath": "pages/settings/index", "text": "设置" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

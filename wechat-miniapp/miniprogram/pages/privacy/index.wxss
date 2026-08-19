@@ -1,0 +1,3 @@
+.privacy-copy { margin-top: 12rpx; color: #b4c2d4; font-size: 28rpx; line-height: 1.75; }
+.danger-zone .btn { margin-top: 20rpx; }
+.danger-zone .btn + .btn { margin-top: 16rpx; }

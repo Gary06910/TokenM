@@ -1,0 +1,9 @@
+<view class="header">
+  <button wx:if="{{back}}" class="header-control" bindtap="goBack" aria-label="返回上一页">
+    <image class="header-icon" src="/assets/chevron-left.svg" mode="aspectFit" aria-hidden="true" />
+  </button>
+  <view wx:else class="header-spacer"></view>
+  <view class="header-title">{{title}}</view>
+  <button wx:if="{{actionText}}" class="header-action" bindtap="onAction">{{actionText}}</button>
+  <view wx:else class="header-spacer"></view>
+</view>

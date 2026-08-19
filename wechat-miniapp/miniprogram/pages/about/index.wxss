@@ -1,0 +1,4 @@
+.about-mark { display: flex; width: 96rpx; height: 96rpx; align-items: center; justify-content: center; margin-top: 48rpx; border: 1rpx solid #315071; border-radius: 24rpx; color: #69a5ff; background: #0d1b2b; font-size: 32rpx; font-weight: 700; }
+.about-title { margin-top: 24rpx; font-size: 40rpx; font-weight: 650; }
+.about-copy { margin-top: 12rpx; color: #b4c2d4; font-size: 28rpx; line-height: 1.7; }
+.muted { color: #7f91a7; }

@@ -1,0 +1,16 @@
+<view class="tabbar" role="tablist">
+  <view
+    wx:for="{{items}}"
+    wx:key="page"
+    class="tab {{selected === index ? 'tab-selected' : ''}}"
+    data-index="{{index}}"
+    data-page="{{item.page}}"
+    bindtap="switchTab"
+    role="tab"
+    aria-selected="{{selected === index}}"
+    aria-label="{{item.text}}"
+  >
+    <image class="tab-icon" src="{{item.icon}}" mode="aspectFit" aria-hidden="true" />
+    <text class="tab-text">{{item.text}}</text>
+  </view>
+</view>

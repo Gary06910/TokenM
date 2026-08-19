@@ -1,0 +1,4 @@
+.detail-head { margin: 28rpx 0 32rpx; }
+.detail-time { margin-top: 8rpx; color: #7f91a7; font-size: 24rpx; }
+.privacy-panel { margin-top: 24rpx; }
+.summary { display: block; margin-top: 16rpx; color: #f2f7ff; font-size: 28rpx; line-height: 1.75; word-break: break-word; white-space: pre-wrap; }

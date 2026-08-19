@@ -1,0 +1,22 @@
+<view class="page">
+  <tm-header title="任务" />
+  <view wx:if="{{banner}}" class="banner"><text class="banner-text">{{banner}}</text><button class="text-button" bindtap="loadFirst">重试</button></view>
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入任务" detail="{{error.message}}" action-text="重试" bind:action="loadFirst" />
+  <ui-state wx:elif="{{items.length === 0}}" mode="empty" title="还没有完成记录" detail="在已绑定电脑上完成一次 Codex 任务后，它会出现在这里。" />
+  <view wx:else class="task-list">
+    <view wx:for="{{items}}" wx:key="taskId" class="task-row row-press" data-id="{{item.taskId}}" bindtap="openTask">
+      <view class="task-top">
+        <view class="row-title">{{item.title}}</view>
+        <view class="row-side">{{item.relativeTime}}</view>
+      </view>
+      <view class="task-bottom">
+        <view class="status status-{{item.notificationStatus === 'sent' ? 'success' : item.notificationStatus === 'failed' ? 'danger' : 'warning'}}"><text class="status-dot"></text><text>{{item.notificationLabel}}</text></view>
+        <text class="row-meta">{{item.desktop.name}}</text>
+      </view>
+    </view>
+    <ui-state wx:if="{{loadingMore}}" mode="loading" compact />
+    <view wx:elif="{{paginationError}}" class="pagination-error"><text>{{paginationError}}</text><button class="text-button" bindtap="loadMore">重试</button></view>
+    <view wx:elif="{{!nextCursor}}" class="list-footer">已显示全部任务</view>
+  </view>
+</view>

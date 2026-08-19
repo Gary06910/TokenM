@@ -1,0 +1,4 @@
+.setting-row { display: flex; min-height: 112rpx; align-items: center; gap: 24rpx; }
+.settings-list { border-top: 1rpx solid #20344d; }
+.setting-link { display: flex; min-height: 112rpx; align-items: center; gap: 16rpx; padding: 16rpx 8rpx; border-bottom: 1rpx solid #20344d; }
+.chevron { width: 40rpx; height: 40rpx; flex: none; }

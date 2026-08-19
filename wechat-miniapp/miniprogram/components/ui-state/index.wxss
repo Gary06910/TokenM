@@ -1,0 +1,11 @@
+.skeleton { box-sizing: border-box; padding: 32rpx 0; }
+.skeleton-line { width: 100%; height: 28rpx; margin-top: 20rpx; border-radius: 8rpx; background: #15263a; animation: pulse 1200ms ease-in-out infinite alternate; }
+.skeleton-title { width: 58%; height: 40rpx; margin-top: 0; }
+.skeleton-short { width: 72%; }
+.state { display: flex; box-sizing: border-box; min-height: 360rpx; flex-direction: column; align-items: center; justify-content: center; padding: 48rpx 24rpx; text-align: center; }
+.state.compact { min-height: 200rpx; padding: 24rpx 12rpx; }
+.state-icon { width: 48rpx; height: 48rpx; margin-bottom: 20rpx; }
+.state-title { color: #f2f7ff; font-size: 30rpx; font-weight: 600; }
+.state-detail { max-width: 580rpx; margin-top: 8rpx; color: #b4c2d4; font-size: 26rpx; line-height: 1.6; }
+.state-action { min-height: 88rpx; margin-top: 20rpx; padding: 0 24rpx; color: #69a5ff; background: transparent; font-size: 26rpx; line-height: 88rpx; }
+@keyframes pulse { from { opacity: .48; } to { opacity: 1; } }

@@ -1,0 +1,4 @@
+{
+  "desc": "Token M 小程序页面不参与微信搜索索引",
+  "rules": [{ "action": "disallow", "page": "*" }]
+}

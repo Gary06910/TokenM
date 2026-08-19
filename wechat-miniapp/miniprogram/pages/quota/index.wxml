@@ -1,0 +1,21 @@
+<view class="page page-secondary">
+  <tm-header title="通知额度" back />
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入通知额度" detail="{{error.message}}" action-text="重试" bind:action="loadPage" />
+  <block wx:else>
+    <view class="quota-main">
+      <view><text class="quota-number">{{quota.available}}</text><text class="quota-unit"> 次</text></view>
+      <view class="status status-{{quota.tone}}"><text class="status-dot"></text><text>{{quota.label}} · {{quota.notice}}</text></view>
+    </view>
+    <view class="notice section">每发送一次 Codex 完成微信提醒，将消耗 1 次通知额度。任务记录不依赖通知额度。</view>
+    <view wx:if="{{message}}" class="notice notice-{{messageTone}} section">{{message}}</view>
+    <view wx:if="{{mainSwitchOff}}" class="switch-help">
+      <text>微信的订阅消息总开关已关闭</text>
+      <button class="text-button" bindtap="openSettings">打开微信设置</button>
+    </view>
+    <button class="btn btn-primary section" disabled="{{requesting || grantPreparing || !grantIntent || blocked || mainSwitchOff}}" bindtap="requestGrant">
+      {{requesting ? '正在申请…' : grantPreparing ? '正在准备…' : mainSwitchOff ? '微信通知总开关已关闭' : blocked ? '当前不可申请' : '补充 1 次通知'}}
+    </button>
+    <view class="quota-help">微信设置中显示的订阅状态用于说明总开关和长期选择，不代表剩余通知额度。</view>
+  </block>
+</view>

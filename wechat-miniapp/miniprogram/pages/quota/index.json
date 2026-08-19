@@ -1,0 +1,6 @@
+{
+  "usingComponents": {
+    "tm-header": "/components/tm-header/index",
+    "ui-state": "/components/ui-state/index"
+  }
+}

@@ -1,0 +1,6 @@
+.quota-main { margin-top: 40rpx; }
+.quota-number { font-size: 64rpx; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.quota-unit { color: #b4c2d4; font-size: 28rpx; }
+.quota-main .status { margin-top: 16rpx; }
+.switch-help { display: flex; min-height: 96rpx; align-items: center; justify-content: space-between; gap: 12rpx; margin-top: 20rpx; color: #b4c2d4; font-size: 26rpx; }
+.quota-help { margin-top: 24rpx; color: #7f91a7; font-size: 24rpx; line-height: 1.6; }

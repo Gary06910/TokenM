@@ -1,0 +1,26 @@
+<view class="page page-secondary">
+  <tm-header title="任务详情" back />
+  <ui-state wx:if="{{state === 'loading'}}" mode="loading" />
+  <ui-state wx:elif="{{state === 'error'}}" mode="error" title="无法载入任务" detail="{{error.message}}" action-text="重试" bind:action="loadTask" />
+  <block wx:else>
+    <view class="detail-head">
+      <view class="status status-{{task.notificationStatus === 'sent' ? 'success' : task.notificationStatus === 'failed' ? 'danger' : 'warning'}}"><text class="status-dot"></text><text>{{task.notificationLabel}}</text></view>
+      <view class="detail-time">{{task.occurredAtLabel}}</view>
+    </view>
+    <view wx:if="{{task.privacyMode}}" class="privacy-panel notice">该任务使用隐私模式，未上传任务内容。</view>
+    <view class="surface detail-list section">
+      <view class="detail-row"><view class="detail-key">电脑</view><view class="detail-value">{{task.desktop.name}}</view></view>
+      <view class="detail-row"><view class="detail-key">完成时间</view><view class="detail-value">{{task.occurredAtLabel}}</view></view>
+      <view class="detail-row"><view class="detail-key">通知</view><view class="detail-value">{{task.notificationLabel}}</view></view>
+      <block wx:if="{{!task.privacyMode}}">
+        <view wx:if="{{task.project}}" class="detail-row"><view class="detail-key">项目</view><view class="detail-value">{{task.project}}</view></view>
+        <view wx:if="{{task.model}}" class="detail-row"><view class="detail-key">模型</view><view class="detail-value">{{task.model}}</view></view>
+        <view wx:if="{{task.durationLabel}}" class="detail-row"><view class="detail-key">耗时</view><view class="detail-value">{{task.durationLabel}}</view></view>
+      </block>
+    </view>
+    <view wx:if="{{!task.privacyMode && task.summary}}" class="section">
+      <view class="section-title">任务结果</view>
+      <text class="summary" selectable user-select>{{task.summary}}</text>
+    </view>
+  </block>
+</view>
