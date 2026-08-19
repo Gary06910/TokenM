@@ -1,0 +1,17 @@
+{
+  "name": "tokenm-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Token M CloudBase API cloud function",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "wx-server-sdk": "~3.0.1"
+  }
+}
