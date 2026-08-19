@@ -34,11 +34,29 @@ module.exports = [
   },
 
   {
+    // The isolated P0 spike server is an ESM-only Node project.
+    files: ['spikes/notification-server-p0/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
+
+  {
     // Cloudflare Worker is ESM with service-worker runtime globals
     files: ['worker/**/*.js'],
     languageOptions: {
       sourceType: 'module',
       globals: { ...globals.serviceworker, ...globals.browser },
+    },
+  },
+
+  {
+    // WeChat platform validation/scanning scripts are standalone Node ESM.
+    files: ['wechat-miniapp/config/**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.node },
     },
   },
 
