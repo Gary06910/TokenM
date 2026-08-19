@@ -521,6 +521,12 @@ function defaultSettings() {
     tokenMCloudDeviceName: '',
     tokenMCodexHookEnabled: false,
     tokenMCloudCredential: '',
+    tokenMWeChatApiUrl: String(process.env.TOKEN_M_WECHAT_API_URL || '').trim(),
+    tokenMWeChatDesktopId: '',
+    tokenMWeChatDesktopName: '',
+    tokenMWeChatEnabled: false,
+    tokenMWeChatPrivacyMode: true,
+    tokenMWeChatCredential: '',
     claudeWebCookie: '',
     opencodeCookie: '',
     opencodeProfiles: {},
@@ -5941,6 +5947,10 @@ app.whenReady().then(() => {
   ipcMain.handle('notifications:createPairing', () => notifications.createPairing());
   ipcMain.handle('notifications:sendTest', () => notifications.sendTest());
   ipcMain.handle('notifications:unpair', (_event, installationId) => notifications.unpair(installationId));
+  ipcMain.handle('notifications:pairWeChat', (_event, request) => notifications.pairWeChat(request || {}));
+  ipcMain.handle('notifications:setWeChatEnabled', (_event, enabled) => notifications.setWeChatEnabled(enabled));
+  ipcMain.handle('notifications:setWeChatPrivacyMode', (_event, privacyMode) => notifications.setWeChatPrivacyMode(privacyMode));
+  ipcMain.handle('notifications:unpairWeChat', () => notifications.unpairWeChat());
 
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {

@@ -1514,6 +1514,42 @@ span.settings-note.settings-item-desc {
   margin: 4px 0 0;
 }
 
+.notification-wechat-card {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.notification-wechat-card .notification-installations-heading {
+  margin-top: 0;
+}
+
+.notification-privacy-options {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.notification-privacy-options label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.notification-privacy-options small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .notification-qr-panel {
   display: grid;
   justify-items: center;

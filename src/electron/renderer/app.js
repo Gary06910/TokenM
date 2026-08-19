@@ -470,6 +470,16 @@ Object.assign(els, {
   notificationPairingExpiry: document.getElementById('notificationPairingExpiry'),
   notificationInstallationList: document.getElementById('notificationInstallationList'),
   notificationActionStatus: document.getElementById('notificationActionStatus'),
+  notificationWeChatPairingFields: document.getElementById('notificationWeChatPairingFields'),
+  notificationWeChatConfiguredFields: document.getElementById('notificationWeChatConfiguredFields'),
+  notificationWeChatApiUrlRow: document.getElementById('notificationWeChatApiUrlRow'),
+  notificationWeChatApiUrlInput: document.getElementById('notificationWeChatApiUrlInput'),
+  notificationWeChatCodeInput: document.getElementById('notificationWeChatCodeInput'),
+  notificationWeChatPairButton: document.getElementById('notificationWeChatPairButton'),
+  notificationWeChatStatus: document.getElementById('notificationWeChatStatus'),
+  notificationWeChatEnabledInput: document.getElementById('notificationWeChatEnabledInput'),
+  notificationWeChatPrivacyInputs: document.querySelectorAll('input[name="notificationWeChatPrivacyMode"]'),
+  notificationWeChatUnpairButton: document.getElementById('notificationWeChatUnpairButton'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
   themeCodeInput: document.getElementById('themeCodeInput'),
@@ -725,6 +735,7 @@ function settingsSectionSummary(section) {
     return t('settings.sync.localOnly');
   }
   if (section === 'notifications') {
+    if (state.notificationStatus?.wechat?.configured) return t('settings.notifications.wechat.summary');
     if (!state.notificationStatus?.configured) return t('settings.notifications.notConfigured');
     return t('settings.notifications.summary', { count: state.notificationStatus.mobileInstallations?.length || 0 });
   }
@@ -8360,21 +8371,42 @@ function setNotificationActionStatus(text, error = false) {
 function renderNotificationSettings() {
   const status = state.notificationStatus;
   const configured = status?.configured === true;
+  const wechat = status?.wechat || {};
+  const wechatConfigured = wechat.configured === true;
   els.notificationEnrollmentFields?.classList.toggle('hidden', configured);
   els.notificationConfiguredFields?.classList.toggle('hidden', !configured);
+  els.notificationWeChatPairingFields?.classList.toggle('hidden', wechatConfigured);
+  els.notificationWeChatConfiguredFields?.classList.toggle('hidden', !wechatConfigured);
   if (els.notificationCloudUrlInput && !els.notificationCloudUrlInput.value) {
     els.notificationCloudUrlInput.value = status?.baseUrl || '';
   }
-  if (els.notificationsSettingsSummary) {
-    els.notificationsSettingsSummary.textContent = configured
-      ? t('settings.notifications.summary', { count: status.mobileInstallations?.length || 0 })
-      : t('settings.notifications.notConfigured');
+  if (els.notificationWeChatApiUrlInput && !els.notificationWeChatApiUrlInput.value) {
+    els.notificationWeChatApiUrlInput.value = wechat.baseUrl || '';
   }
-  if (!configured) return;
-  if (els.notificationDeviceStatus) {
+  if (els.notificationWeChatApiUrlRow) {
+    els.notificationWeChatApiUrlRow.classList.toggle('hidden', !wechatConfigured && Boolean(wechat.baseUrl));
+  }
+  if (els.notificationsSettingsSummary) {
+    els.notificationsSettingsSummary.textContent = wechatConfigured
+      ? t('settings.notifications.wechat.summary')
+      : configured
+        ? t('settings.notifications.summary', { count: status.mobileInstallations?.length || 0 })
+        : t('settings.notifications.notConfigured');
+  }
+  if (configured && els.notificationDeviceStatus) {
     els.notificationDeviceStatus.textContent = t('settings.notifications.connectedAs', {
       name: status.device?.name || status.device?.deviceId || '—'
     });
+  }
+  if (wechatConfigured && els.notificationWeChatStatus) {
+    els.notificationWeChatStatus.textContent = t('settings.notifications.wechat.connectedAs', {
+      name: wechat.desktop?.name || wechat.desktop?.desktopId || '—',
+      pending: wechat.outbox?.pending || 0
+    });
+  }
+  if (els.notificationWeChatEnabledInput) els.notificationWeChatEnabledInput.checked = wechat.enabled === true;
+  for (const input of els.notificationWeChatPrivacyInputs || []) {
+    input.checked = input.value === (wechat.privacyMode === false ? 'full' : 'privacy');
   }
   const hookEnabled = status.hook?.enabled === true;
   if (els.notificationHookStatus) {
@@ -8384,9 +8416,10 @@ function renderNotificationSettings() {
   }
   els.notificationEnableHookButton?.classList.toggle('hidden', hookEnabled);
   els.notificationDisableHookButton?.classList.toggle('hidden', !hookEnabled);
+  if (els.notificationEnableHookButton) els.notificationEnableHookButton.disabled = !configured && !wechatConfigured;
   els.notificationTrustNote?.classList.toggle('hidden', !hookEnabled || status.hook?.needsTrust !== true);
-  if (els.notificationTestButton) els.notificationTestButton.disabled = !(status.mobileInstallations?.length > 0);
-  if (els.notificationInstallationList) {
+  if (els.notificationTestButton) els.notificationTestButton.disabled = !configured || !(status.mobileInstallations?.length > 0);
+  if (configured && els.notificationInstallationList) {
     els.notificationInstallationList.replaceChildren();
     const installations = status.mobileInstallations || [];
     if (installations.length === 0) {
@@ -11111,6 +11144,69 @@ els.notificationEnrollButton?.addEventListener('click', async () => {
     setNotificationActionStatus(notificationErrorText(error), true);
   } finally {
     els.notificationEnrollButton.disabled = false;
+  }
+});
+
+els.notificationWeChatPairButton?.addEventListener('click', async () => {
+  const code = els.notificationWeChatCodeInput.value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    setNotificationActionStatus(t('settings.notifications.wechat.invalidCode'), true);
+    return;
+  }
+  els.notificationWeChatPairButton.disabled = true;
+  setNotificationActionStatus(t('settings.notifications.wechat.pairing'));
+  try {
+    state.notificationStatus = await window.tokenMNotifications.pairWeChat({
+      baseUrl: els.notificationWeChatApiUrlInput.value.trim(),
+      code
+    });
+    els.notificationWeChatCodeInput.value = '';
+    renderNotificationSettings();
+    setNotificationActionStatus(t('settings.notifications.wechat.paired'));
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  } finally {
+    els.notificationWeChatPairButton.disabled = false;
+  }
+});
+
+els.notificationWeChatEnabledInput?.addEventListener('change', async () => {
+  els.notificationWeChatEnabledInput.disabled = true;
+  try {
+    state.notificationStatus = await window.tokenMNotifications.setWeChatEnabled(els.notificationWeChatEnabledInput.checked);
+    renderNotificationSettings();
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+    renderNotificationSettings();
+  } finally {
+    els.notificationWeChatEnabledInput.disabled = false;
+  }
+});
+
+for (const input of els.notificationWeChatPrivacyInputs || []) {
+  input.addEventListener('change', async () => {
+    if (!input.checked) return;
+    try {
+      state.notificationStatus = await window.tokenMNotifications.setWeChatPrivacyMode(input.value !== 'full');
+      renderNotificationSettings();
+    } catch (error) {
+      setNotificationActionStatus(notificationErrorText(error), true);
+      renderNotificationSettings();
+    }
+  });
+}
+
+els.notificationWeChatUnpairButton?.addEventListener('click', async () => {
+  if (!window.confirm(t('settings.notifications.wechat.unpairConfirm'))) return;
+  els.notificationWeChatUnpairButton.disabled = true;
+  try {
+    state.notificationStatus = await window.tokenMNotifications.unpairWeChat();
+    renderNotificationSettings();
+    setNotificationActionStatus(t('settings.notifications.wechat.unpaired'));
+  } catch (error) {
+    setNotificationActionStatus(notificationErrorText(error), true);
+  } finally {
+    els.notificationWeChatUnpairButton.disabled = false;
   }
 });
 

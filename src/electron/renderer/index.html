@@ -1438,6 +1438,26 @@
           </button>
           <div id="notificationsSettingsDetails" class="settings-section-details hidden">
             <p class="settings-note" data-i18n="settings.notifications.description">Get a phone notification when a Codex turn completes. Notification events contain only identifiers, the project folder name, and timing.</p>
+            <div class="notification-wechat-card">
+              <div class="notification-installations-heading" data-i18n="settings.notifications.wechat.title">WeChat notifications</div>
+              <p class="settings-note" data-i18n="settings.notifications.wechat.description">Pair with the Token M Mini Program using its six-digit code. Privacy mode is used by default.</p>
+              <div id="notificationWeChatPairingFields" class="notification-enrollment-fields">
+                <label id="notificationWeChatApiUrlRow"><span data-i18n="settings.notifications.wechat.apiUrl">Advanced CloudBase API origin</span><input id="notificationWeChatApiUrlInput" type="url" inputmode="url" spellcheck="false" placeholder="https://api.example.com" /></label>
+                <label><span data-i18n="settings.notifications.wechat.code">Six-digit pairing code</span><input id="notificationWeChatCodeInput" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" spellcheck="false" /></label>
+                <div class="settings-actions"><button id="notificationWeChatPairButton" type="button" data-i18n="settings.notifications.wechat.pair">Pair WeChat</button></div>
+              </div>
+              <div id="notificationWeChatConfiguredFields" class="hidden">
+                <div id="notificationWeChatStatus" class="notification-device-status"></div>
+                <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notifications.wechat.enabled">Send WeChat notifications</span></span><input id="notificationWeChatEnabledInput" type="checkbox" /></label>
+                <fieldset class="notification-privacy-options">
+                  <legend data-i18n="settings.notifications.wechat.contentMode">Uploaded task content</legend>
+                  <label><input type="radio" name="notificationWeChatPrivacyMode" value="privacy" /><span><strong data-i18n="settings.notifications.wechat.privacy">Privacy mode</strong><small data-i18n="settings.notifications.wechat.privacyDescription">Only completion identity and time; no prompt, cwd, conversation, source, or result content.</small></span></label>
+                  <label><input type="radio" name="notificationWeChatPrivacyMode" value="full" /><span><strong data-i18n="settings.notifications.wechat.full">Full mode</strong><small data-i18n="settings.notifications.wechat.fullDescription">Also upload project, model, duration, and up to 600 characters of the final task summary.</small></span></label>
+                </fieldset>
+                <p class="settings-note" data-i18n="settings.notifications.wechat.renameHint">Rename this computer from the Mini Program's computer list.</p>
+                <div class="settings-actions"><button id="notificationWeChatUnpairButton" type="button" data-i18n="settings.notifications.wechat.unpair">Unpair this computer</button></div>
+              </div>
+            </div>
             <div id="notificationEnrollmentFields" class="notification-enrollment-fields">
               <label><span data-i18n="settings.notifications.cloudUrl">Token M cloud URL</span><input id="notificationCloudUrlInput" type="url" inputmode="url" spellcheck="false" placeholder="https://example.workers.dev" /></label>
               <label><span data-i18n="settings.notifications.enrollmentCode">Private beta enrollment code</span><input id="notificationEnrollmentCodeInput" type="password" autocomplete="off" spellcheck="false" /></label>
@@ -1445,14 +1465,6 @@
             </div>
             <div id="notificationConfiguredFields" class="hidden">
               <div id="notificationDeviceStatus" class="notification-device-status"></div>
-              <div class="notification-hook-card">
-                <div><strong data-i18n="settings.notifications.codexHook">Codex Stop hook</strong><p id="notificationHookStatus" class="settings-note"></p></div>
-                <div class="settings-actions">
-                  <button id="notificationEnableHookButton" type="button" data-i18n="settings.notifications.enableHook">Enable Codex hook</button>
-                  <button id="notificationDisableHookButton" type="button" class="hidden" data-i18n="settings.notifications.disableHook">Disable Codex hook</button>
-                </div>
-              </div>
-              <p id="notificationTrustNote" class="settings-note hub-warning hidden" data-i18n="settings.notifications.trustNote">Open Codex /hooks and review or trust the Token M Stop hook after enabling it.</p>
               <div class="notification-pairing-card">
                 <div class="settings-actions">
                   <button id="notificationPairButton" type="button" data-i18n="settings.notifications.pairPhone">Pair a phone</button>
@@ -1466,6 +1478,14 @@
               <div class="notification-installations-heading" data-i18n="settings.notifications.pairedDevices">Paired devices</div>
               <div id="notificationInstallationList" class="notification-installation-list"></div>
             </div>
+            <div class="notification-hook-card">
+              <div><strong data-i18n="settings.notifications.codexHook">Codex Stop hook</strong><p id="notificationHookStatus" class="settings-note"></p></div>
+              <div class="settings-actions">
+                <button id="notificationEnableHookButton" type="button" data-i18n="settings.notifications.enableHook">Enable Codex hook</button>
+                <button id="notificationDisableHookButton" type="button" class="hidden" data-i18n="settings.notifications.disableHook">Disable Codex hook</button>
+              </div>
+            </div>
+            <p id="notificationTrustNote" class="settings-note hub-warning hidden" data-i18n="settings.notifications.trustNote">Open Codex /hooks and review or trust the Token M Stop hook after enabling it.</p>
             <p id="notificationActionStatus" class="settings-note" role="status" aria-live="polite"></p>
           </div>
         </div>

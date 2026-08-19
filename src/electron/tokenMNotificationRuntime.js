@@ -19,6 +19,7 @@ const {
   enrollTokenMDesktop,
   managedCloudOrigin
 } = require('./tokenMManagedApi');
+const { createWeChatNotificationRuntime } = require('./wechatNotificationRuntime');
 
 const DESKTOP_CREDENTIAL_RE = /^tm_d1\.[A-Za-z0-9_-]{22}\.(dev_[A-Za-z0-9_-]{22})\.[A-Za-z0-9_-]{43}$/;
 
@@ -100,6 +101,14 @@ function createTokenMNotificationRuntime(options) {
   let stopped = true;
   let statusTimer = null;
   let lifecycle = Promise.resolve();
+  const wechat = createWeChatNotificationRuntime({
+    userDataPath,
+    fetch,
+    getSettings,
+    commitSettings,
+    logger,
+    hostname
+  });
 
   function currentConfiguration() {
     const settings = getSettings() || {};
@@ -133,7 +142,8 @@ function createTokenMNotificationRuntime(options) {
       device: config.configured ? sanitizeDevice(cloudStatus?.device, fallbackDevice) : null,
       hook: { enabled: hook.enabled, needsTrust: hook.needsTrust, error: hook.error },
       outbox: { pending: snapshot.pending, lastError: snapshot.lastError || lastCloudError },
-      mobileInstallations: sanitizeInstallations(cloudStatus?.mobileInstallations)
+      mobileInstallations: sanitizeInstallations(cloudStatus?.mobileInstallations),
+      wechat: wechat.publicStatus()
     };
   }
 
@@ -147,16 +157,21 @@ function createTokenMNotificationRuntime(options) {
     try { fs.unlinkSync(runtimePath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
 
-  async function stopComponents() {
-    if (statusTimer) clearInterval(statusTimer);
-    statusTimer = null;
+  async function stopBridge() {
     const activeBridge = bridge;
     bridge = null;
     if (activeBridge) await activeBridge.stop();
     removeRuntimeMetadata();
+  }
+
+  async function stopComponents() {
+    if (statusTimer) clearInterval(statusTimer);
+    statusTimer = null;
+    await stopBridge();
     const activeOutbox = outbox;
     outbox = null;
     if (activeOutbox) await activeOutbox.stop();
+    await wechat.stop();
     cloud = null;
     management = null;
   }
@@ -164,7 +179,7 @@ function createTokenMNotificationRuntime(options) {
   async function startBridge() {
     if (bridge || !hookState().enabled) return;
     const config = currentConfiguration();
-    if (!config.configured || !outbox) return;
+    if (!(config.configured && outbox) && !wechat.isActive()) return;
     const token = crypto.randomBytes(32).toString('base64url');
     const instance = createCodexHookBridge({
       host: '127.0.0.1',
@@ -173,9 +188,21 @@ function createTokenMNotificationRuntime(options) {
       logger,
       onCompletion: async (input) => {
         const latest = currentConfiguration();
-        if (!latest.configured) throw new Error('notifications_not_configured');
-        const event = normalizeCodexCompletion(input, { deviceId: latest.deviceId });
-        await outbox.enqueue(event);
+        const identityDeviceId = latest.configured ? latest.deviceId : wechat.identityDeviceId();
+        if (!identityDeviceId) return;
+        const event = normalizeCodexCompletion(input, { deviceId: identityDeviceId });
+        const routes = [];
+        if (latest.configured && outbox) routes.push(['managed', outbox.enqueue(event)]);
+        if (wechat.isActive()) routes.push(['wechat', wechat.enqueue(event, input)]);
+        const results = await Promise.allSettled(routes.map(([, operation]) => operation));
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            logger.warn?.('Notification route enqueue failed', {
+              route: routes[index][0],
+              code: safeMachineCode(result.reason)
+            });
+          }
+        });
         publish();
       }
     });
@@ -187,6 +214,12 @@ function createTokenMNotificationRuntime(options) {
       await instance.stop();
       throw error;
     }
+  }
+
+  async function reconcileBridge() {
+    const config = currentConfiguration();
+    if ((config.configured && outbox) || wechat.isActive()) return startBridge();
+    return stopBridge();
   }
 
   async function refreshCloudStatus() {
@@ -202,19 +235,25 @@ function createTokenMNotificationRuntime(options) {
 
   async function startComponents() {
     const config = currentConfiguration();
-    if (!config.configured) return;
-    cloud = createTokenMCloudClient({ baseUrl: config.baseUrl, credential: config.credential, fetch });
-    management = createTokenMDesktopManagementClient({ baseUrl: config.baseUrl, credential: config.credential, fetch });
-    outbox = createNotificationOutbox({
-      filePath: outboxPath,
-      send: (event) => cloud.sendEvent(event),
-      logger
-    });
-    await outbox.start();
+    await wechat.start();
+    if (config.configured) {
+      cloud = createTokenMCloudClient({ baseUrl: config.baseUrl, credential: config.credential, fetch });
+      management = createTokenMDesktopManagementClient({ baseUrl: config.baseUrl, credential: config.credential, fetch });
+      outbox = createNotificationOutbox({
+        filePath: outboxPath,
+        send: (event) => cloud.sendEvent(event),
+        logger
+      });
+      await outbox.start();
+      await refreshCloudStatus();
+    }
     await startBridge();
-    await refreshCloudStatus();
-    statusTimer = setInterval(() => { void refreshCloudStatus(); }, 60_000);
-    statusTimer.unref?.();
+    if (config.configured || wechat.configuration().configured) {
+      statusTimer = setInterval(() => {
+        void Promise.all([refreshCloudStatus(), wechat.refreshStatus()]).then(publish);
+      }, 60_000);
+      statusTimer.unref?.();
+    }
   }
 
   function inLifecycle(operation) {
@@ -252,11 +291,15 @@ function createTokenMNotificationRuntime(options) {
       const activeOutbox = outbox;
       outbox = null;
       if (activeOutbox) void activeOutbox.stop();
+      wechat.shutdownSync();
       cloud = null;
       management = null;
     },
     getStatus() {
-      return inLifecycle(() => refreshCloudStatus());
+      return inLifecycle(async () => {
+        await Promise.all([refreshCloudStatus(), wechat.refreshStatus()]);
+        return publish();
+      });
     },
     enroll({ baseUrl, code }) {
       return inLifecycle(async () => {
@@ -277,7 +320,9 @@ function createTokenMNotificationRuntime(options) {
     },
     enableCodexHook() {
       return inLifecycle(async () => {
-        if (!currentConfiguration().configured) throw new Error('notifications_not_configured');
+        if (!currentConfiguration().configured && !wechat.configuration().configured) {
+          throw new Error('notifications_not_configured');
+        }
         const state = enableCodexStopHook({ codexHome, command, commandWindows: command });
         if (state.enabled) {
           await commitSettings({ tokenMCodexHookEnabled: true });
@@ -328,6 +373,33 @@ function createTokenMNotificationRuntime(options) {
         await management.unpair(installationId);
         await refreshCloudStatus();
         return publicStatus();
+      });
+    },
+    pairWeChat(request) {
+      return inLifecycle(async () => {
+        await wechat.pair(request);
+        await reconcileBridge();
+        return publish();
+      });
+    },
+    setWeChatEnabled(enabled) {
+      return inLifecycle(async () => {
+        await wechat.setEnabled(enabled === true);
+        await reconcileBridge();
+        return publish();
+      });
+    },
+    setWeChatPrivacyMode(privacyMode) {
+      return inLifecycle(async () => {
+        await wechat.setPrivacyMode(privacyMode);
+        return publish();
+      });
+    },
+    unpairWeChat() {
+      return inLifecycle(async () => {
+        await wechat.unpairSelf();
+        await reconcileBridge();
+        return publish();
       });
     }
   };

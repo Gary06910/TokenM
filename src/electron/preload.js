@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('tokenMNotifications', {
   createPairing: () => ipcRenderer.invoke('notifications:createPairing'),
   sendTest: () => ipcRenderer.invoke('notifications:sendTest'),
   unpair: (installationId) => ipcRenderer.invoke('notifications:unpair', installationId),
+  pairWeChat: (request) => ipcRenderer.invoke('notifications:pairWeChat', request),
+  setWeChatEnabled: (enabled) => ipcRenderer.invoke('notifications:setWeChatEnabled', enabled),
+  setWeChatPrivacyMode: (privacyMode) => ipcRenderer.invoke('notifications:setWeChatPrivacyMode', privacyMode),
+  unpairWeChat: () => ipcRenderer.invoke('notifications:unpairWeChat'),
   onStatus: (callback) => {
     const listener = (_event, status) => { try { callback(status); } catch (_) {} };
     ipcRenderer.on('notifications:status', listener);
