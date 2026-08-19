@@ -1,0 +1,6 @@
+{
+  "appid": "touristappid",
+  "projectname": "token-m-contract-fixture",
+  "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/"
+}
