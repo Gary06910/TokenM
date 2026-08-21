@@ -18,7 +18,8 @@ Page({
   onShow() {
     const tabBar = this.getTabBar && this.getTabBar();
     if (tabBar) tabBar.setData({ selected: 1 });
-    this.loadFirst(this.data.state === 'ready');
+    const fresh = this.loadedAt && Date.now() - this.loadedAt < 5000;
+    if (!fresh) this.loadFirst(this.data.state === 'ready');
   },
 
   onPullDownRefresh() {
@@ -38,6 +39,7 @@ Page({
         paginationError: '',
         banner: '',
       });
+      this.loadedAt = Date.now();
     } catch (error) {
       const presented = presentError(error);
       if (keepExisting && this.data.items.length) this.setData({ banner: `更新失败：${presented.message}` });

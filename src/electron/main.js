@@ -516,11 +516,7 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
-    tokenMCloudUrl: '',
-    tokenMCloudDeviceId: '',
-    tokenMCloudDeviceName: '',
     tokenMCodexHookEnabled: false,
-    tokenMCloudCredential: '',
     tokenMWeChatApiUrl: String(process.env.TOKEN_M_WECHAT_API_URL || '').trim(),
     tokenMWeChatDesktopId: '',
     tokenMWeChatDesktopName: '',
@@ -5941,12 +5937,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('notifications:getStatus', () => notifications.getStatus());
-  ipcMain.handle('notifications:enroll', (_event, request) => notifications.enroll(request || {}));
   ipcMain.handle('notifications:enableCodexHook', () => notifications.enableCodexHook());
   ipcMain.handle('notifications:disableCodexHook', () => notifications.disableCodexHook());
-  ipcMain.handle('notifications:createPairing', () => notifications.createPairing());
-  ipcMain.handle('notifications:sendTest', () => notifications.sendTest());
-  ipcMain.handle('notifications:unpair', (_event, installationId) => notifications.unpair(installationId));
   ipcMain.handle('notifications:pairWeChat', (_event, request) => notifications.pairWeChat(request || {}));
   ipcMain.handle('notifications:setWeChatEnabled', (_event, enabled) => notifications.setWeChatEnabled(enabled));
   ipcMain.handle('notifications:setWeChatPrivacyMode', (_event, privacyMode) => notifications.setWeChatPrivacyMode(privacyMode));

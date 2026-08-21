@@ -8,7 +8,7 @@
 
 采用原生微信小程序（WXML/WXSS/JavaScript）+ 微信云开发/CloudBase + Node.js 云函数。新能力放在仓库顶层隔离目录 `wechat-miniapp/`。不引入 Taro、uni-app、React 或 Vue；本功能没有跨端 UI 复用需求，原生方案体积、导入和审核风险最低。
 
-现有 Codex Stop Hook 不复制、不重装。`src/shared/codexCompletion.js` 继续作为 completion identity 的来源；桌面端在现有 bridge 收到一次 Stop 后把同一个 normalized completion fan-out 到现有 Android/Web Push transport 和新的 WeChat transport。任一路线失败不得改变 Codex 任务结果，也不得阻断另一条路线。
+现有 Codex Stop Hook 不复制、不重装。`src/shared/codexCompletion.js` 继续作为 completion identity 的来源；桌面端在现有 bridge 收到一次 Stop 后把同一个 normalized completion 发送到当前 canonical WeChat transport。旧 legacy mobile notification route 路线仅作为历史兼容记录，不属于本小程序正式通知实现。任一路线失败不得改变 Codex 任务结果。
 
 参考项目 `aa875982361/codex-task-notifier` 仅用于行为研究。2026-08-18 查询到其 GitHub license metadata 为 `null`，因此不复制其源码。采纳的独立设计思想只有：Stop 触发、隐私最小载荷、稳定 delivery identity、bounded retry、通知失败不影响 Codex。
 
@@ -18,7 +18,7 @@
 flowchart LR
   Codex["Codex Stop event"] --> Bridge["Token M local hook bridge"]
   Bridge --> Normalize["Existing completion normalization"]
-  Normalize --> Android["Existing Android/Web Push transport"]
+  Normalize --> WeChat["Canonical WeChat transport"]
   Normalize --> WXOutbox["WeChat local durable outbox"]
   WXOutbox -->|"HTTPS + device bearer"| HTTP["CloudBase HTTP gateway"]
   Mini["微信小程序"] -->|"wx.cloud.callFunction + OPENID context"| API["tokenm-api cloud function"]
@@ -56,7 +56,7 @@ docs/wechat-miniapp/           冻结文档、部署与提交材料
 docs/agent-prompts/            Worker 完整 prompt
 ```
 
-Desktop 生产代码仅新增微信 transport/pairing 模块与现有 runtime 的最小 fan-out 接点；Android `spikes/`、Cloudflare Worker managed notifications 与现有 settings key 不删除、不迁移。
+Desktop 生产代码仅新增微信 transport/pairing 模块与现有 runtime 的最小接点；legacy managed notification route 保留为独立历史兼容代码，不参与当前微信通知链。
 
 ## 4. 组件职责
 
@@ -148,7 +148,7 @@ Desktop 生产代码仅新增微信 transport/pairing 模块与现有 runtime �
 - 不引入前端框架或 Web-only motion library。
 - 不把 AppSecret 放进仓库、客户端或 Desktop。
 - 不建立第二套 Codex Hook。
-- 不把 Android Receiver 或现有 Web Push 迁移到 CloudBase。
+- 当前实现不依赖 Android Receiver、PWA 或 Web Push；这些路线不迁移到 CloudBase，也不作为微信小程序正式方案维护。
 - 不实现 prompt/完整聊天同步、远程控制 Codex、多人共享 desktop 或公共用户注册。
 - 不宣称已部署、已审核或已真实发送；真实平台步骤是独立 gate。
 

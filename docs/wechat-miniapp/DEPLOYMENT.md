@@ -2,6 +2,10 @@
 
 状态：人工部署手册；本地文件通过不等于已部署、已发出通知或已通过审核。执行前先阅读冻结的 `ARCHITECTURE.md`、`SECURITY_MODEL.md`、`DATA_MODEL.md` 与 `API_CONTRACT.md`。
 
+收尾状态（2026-08-20）：`bootstrap` 与 `listDesktops` 已完成真实云端 smoke test；bootstrap 临时诊断返回码已移除。CloudBase repository 的 `set`/`update` 必须使用 `{ data: document }`，并在 `.doc(id)` 写入时剔除 `_id`；`errCode=-1` 不能单独视为 document-not-found。`READY_FOR_REAL_PAIRING_TEST` 仍需正式部署和安全收尾。
+
+**第一次真实 desktop pairing 前必须轮换 `PAIRING_CODE_PEPPER` 与 `DEVICE_SECRET_PEPPER`，因为旧值曾在截图中暴露。文档不记录实际 pepper 值。**
+
 ## 环境状态
 
 `WECHAT_MINIPROGRAM_STATE` 只有三种合法值：开发者工具/开发版使用 `developer`，上传并设为体验版后的真机验收使用 `trial`，审核通过并发布正式版后才使用 `formal`。每次切换都要重新检查云函数环境变量并部署生效，不能用 `developer` 的模拟结果替代体验版证据。

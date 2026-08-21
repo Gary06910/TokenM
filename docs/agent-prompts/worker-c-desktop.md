@@ -4,7 +4,7 @@ Model requirement: GPT-5.6 Sol, reasoning effort high.
 
 Work only in isolated branch/worktree `codex/wechat-desktop`. Read `AGENTS.md`, all frozen docs, and audit the current notification pipeline before editing: `src/shared/codexCompletion.js`, Stop Hook/bridge/forwarder, notification outbox, cloud clients, runtime, credential store, settings IPC/UI, and tests.
 
-Important: the user's main worktree already has uncommitted edits in `codexHookForwarder.js`, `codexStopHook.js`, `tokenMNotificationRuntime.js`, credential-adjacent tests and other files. Your branch starts from the confirmed HEAD, so never assume your version supersedes those edits. Keep shared touch patches minimal and report exact hunks so Lead can merge manually. Never touch or delete `spikes/` or Android/Web Push behavior.
+Important: the user's main worktree already has uncommitted edits in `codexHookForwarder.js`, `codexStopHook.js`, `tokenMNotificationRuntime.js`, credential-adjacent tests and other files. Your branch starts from the confirmed HEAD, so never assume your version supersedes those edits. Keep shared touch patches minimal and report exact hunks so Lead can merge manually. Never touch or delete `spikes/` or legacy mobile notification route behavior.
 
 Ownership:
 

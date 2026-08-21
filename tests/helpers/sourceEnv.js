@@ -10,6 +10,8 @@
 // instead would drop the coverage they exist for, and is the tempting fix for
 // whoever hits this next.
 const SOURCE_ENV_KEYS = Object.freeze([
+  'APPDATA',
+  'LOCALAPPDATA',
   'XDG_DATA_HOME',
   'COPILOT_OTEL_FILE_EXPORTER_PATH',
   'CODEX_HOME',

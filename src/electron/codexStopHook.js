@@ -53,15 +53,32 @@ function commandValue(entry) {
   return entry && typeof entry === 'object' && entry.type === 'command' ? entry.command : null;
 }
 
-function identityValue(commandIdentity) {
-  return typeof commandIdentity === 'string' ? commandIdentity : commandIdentity?.command;
+function identityDetails(commandIdentity) {
+  if (typeof commandIdentity === 'string') {
+    return { command: commandIdentity, commandWindows: null, legacyCommands: [] };
+  }
+  return {
+    command: commandIdentity?.command,
+    commandWindows: commandIdentity?.commandWindows || null,
+    legacyCommands: Array.isArray(commandIdentity?.legacyCommands) ? commandIdentity.legacyCommands : []
+  };
+}
+
+function handlerMatchesCurrent(entry, commandIdentity) {
+  const identity = identityDetails(commandIdentity);
+  if (commandValue(entry) !== identity.command) return false;
+  return !identity.commandWindows || entry.commandWindows === identity.commandWindows;
+}
+
+function handlerMatchesAny(entry, commandIdentity) {
+  const identity = identityDetails(commandIdentity);
+  const candidates = new Set([identity.command, identity.commandWindows, ...identity.legacyCommands].filter(Boolean));
+  return entry?.type === 'command' && (candidates.has(entry.command) || candidates.has(entry.commandWindows));
 }
 
 function containsCommand(config, identity) {
-  const target = identityValue(identity);
-  if (!target) return false;
   return (config?.hooks?.Stop || []).some((group) => (
-    Array.isArray(group?.hooks) && group.hooks.some((entry) => commandValue(entry) === target)
+    Array.isArray(group?.hooks) && group.hooks.some((entry) => handlerMatchesCurrent(entry, identity))
   ));
 }
 
@@ -125,21 +142,46 @@ function backupExisting(configPath, raw, fsApi) {
   }
 }
 
-function enableCodexStopHook({ codexHome, command, commandWindows, backup = true, fs: fsApi = nodeFs }) {
+function enableCodexStopHook({ codexHome, command, commandWindows, legacyCommands = [], backup = true, fs: fsApi = nodeFs }) {
   const configPath = configPathFor(codexHome);
   let createdBackupPath = null;
   try {
     assertCodexHomeSafe(codexHome, fsApi);
-    const selectedCommand = process.platform === 'win32' && commandWindows ? commandWindows : command;
-    if (typeof selectedCommand !== 'string' || !selectedCommand.trim()) throw new TypeError('Hook command is required');
+    if (typeof command !== 'string' || !command.trim()) throw new TypeError('Hook command is required');
+    if (commandWindows !== undefined && commandWindows !== null
+      && (typeof commandWindows !== 'string' || !commandWindows.trim())) {
+      throw new TypeError('Windows hook command must be a non-empty string');
+    }
+    const identity = { command, commandWindows, legacyCommands };
     const document = readConfig(configPath, fsApi);
-    if (containsCommand(document.value, selectedCommand)) return hookState(configPath, true);
+    if (containsCommand(document.value, identity)) return hookState(configPath, true);
     const value = structuredClone(document.value);
     if (value.hooks === undefined) value.hooks = {};
     if (!value.hooks || typeof value.hooks !== 'object' || Array.isArray(value.hooks)) throw new Error('hooks must be an object');
     if (value.hooks.Stop === undefined) value.hooks.Stop = [];
     if (!Array.isArray(value.hooks.Stop)) throw new Error('hooks.Stop must be an array');
-    value.hooks.Stop.push({ matcher: '', hooks: [{ type: 'command', command: selectedCommand, timeout: 5 }] });
+    let migrated = false;
+    const legacyIdentity = { command: null, legacyCommands };
+    value.hooks.Stop = value.hooks.Stop.map((group) => {
+      if (!Array.isArray(group?.hooks)) return group;
+      return {
+        ...group,
+        hooks: group.hooks.map((entry) => {
+          if (migrated || !handlerMatchesAny(entry, legacyIdentity)) return entry;
+          migrated = true;
+          const next = { ...entry, command };
+          if (commandWindows) next.commandWindows = commandWindows;
+          else delete next.commandWindows;
+          return next;
+        })
+      };
+    });
+    if (!migrated) {
+      value.hooks.Stop.push({
+        matcher: '',
+        hooks: [{ type: 'command', command, ...(commandWindows ? { commandWindows } : {}), timeout: 5 }]
+      });
+    }
     const backupPath = document.exists && backup ? backupExisting(configPath, document.raw, fsApi) : null;
     createdBackupPath = backupPath;
     writeAtomic(configPath, value, fsApi);
@@ -153,14 +195,17 @@ function disableCodexStopHook({ codexHome, commandIdentity, fs: fsApi = nodeFs }
   const configPath = configPathFor(codexHome);
   try {
     assertCodexHomeSafe(codexHome, fsApi);
-    const target = identityValue(commandIdentity);
-    if (!target) throw new TypeError('commandIdentity is required');
+    const identity = identityDetails(commandIdentity);
+    if (!identity.command) throw new TypeError('commandIdentity is required');
     const document = readConfig(configPath, fsApi);
-    if (!document.exists || !containsCommand(document.value, target)) return hookState(configPath, false);
+    const hasMatchingHandler = (document.value?.hooks?.Stop || []).some((group) => (
+      Array.isArray(group?.hooks) && group.hooks.some((entry) => handlerMatchesAny(entry, identity))
+    ));
+    if (!document.exists || !hasMatchingHandler) return hookState(configPath, false);
     const value = structuredClone(document.value);
     value.hooks.Stop = value.hooks.Stop.flatMap((group) => {
       if (!Array.isArray(group?.hooks)) return [group];
-      const hooks = group.hooks.filter((entry) => commandValue(entry) !== target);
+      const hooks = group.hooks.filter((entry) => !handlerMatchesAny(entry, identity));
       if (hooks.length === 0) return [];
       return [{ ...group, hooks }];
     });

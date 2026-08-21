@@ -155,10 +155,11 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
-function spawnTokscaleJson(userArgs, commandTimeoutMs) {
+function spawnTokscaleJson(userArgs, commandTimeoutMs, envOverrides = null) {
   const { bin, prefixArgs, env } = tokscaleCommand();
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
+    const childEnv = envOverrides ? { ...env, ...envOverrides } : env;
+    const child = spawn(bin, [...prefixArgs, ...userArgs], { env: childEnv, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timeout = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`)); }, commandTimeoutMs);
@@ -198,16 +199,32 @@ function tokscaleClientFilter(clients) {
   return ordered.join(',');
 }
 
-function runTokscale({ clients, flags, commandTimeoutMs }) {
+function runTokscale({ clients, flags, commandTimeoutMs, homeDir = os.homedir() }) {
   const clientFilter = tokscaleClientFilter(clients);
   if (!clientFilter) return Promise.resolve({ entries: [] });
-  return spawnTokscaleJson(['--json', '--client', clientFilter, '--group-by', 'client,session,model', ...flags], commandTimeoutMs);
+  // Keep tokscale's default scan root aligned with every source probe in this
+  // module. On Windows Node resolves os.homedir() from USERPROFILE, while
+  // tokscale's Rust path resolver can prefer an unrelated HOME override. The UI
+  // can therefore detect ~/.codex/sessions under the profile while tokscale
+  // scans a different tree and returns zero rows. Aligning the child HOME (not
+  // passing --home) preserves explicit roots such as CODEX_HOME; WSL scans keep
+  // using their more specific --home flag below.
+  const scanFlags = Array.isArray(flags) ? flags : [];
+  return spawnTokscaleJson(
+    ['--json', '--client', clientFilter, '--group-by', 'client,session,model', ...scanFlags],
+    commandTimeoutMs,
+    { HOME: homeDir }
+  );
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, homeDir = os.homedir() }) {
   const clientFilter = tokscaleClientFilter(clients);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  return spawnTokscaleJson(['graph', '--client', clientFilter, '--no-spinner'], commandTimeoutMs);
+  return spawnTokscaleJson(
+    ['graph', '--client', clientFilter, '--no-spinner'],
+    commandTimeoutMs,
+    { HOME: homeDir }
+  );
 }
 
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
@@ -932,7 +949,11 @@ async function collectHistoryOnce(options) {
   const todayKey = options.todayKey || localTodayKey();
   if (clients) {
     try {
-      const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
+      const graphJson = await runGraph({
+        clients,
+        commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS,
+        homeDir: options.homeDir || os.homedir()
+      });
       rawGraphs.push(graphJson);
       histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
     } catch (error) {
@@ -988,7 +1009,9 @@ async function collectUsageOnce(options) {
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
-  const runTokscaleFn = options.runTokscale || runTokscale;
+  const scanHomeDir = options.homeDir || os.homedir();
+  const runTokscaleFn = options.runTokscale
+    || ((scanOptions) => runTokscale({ ...scanOptions, homeDir: scanHomeDir }));
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
   // Injectable only for the WSL-status gate, so tests can exercise the win32
@@ -1397,6 +1420,7 @@ async function collectUsageOnce(options) {
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
       todayKey: localTodayKey(collectedAt),
+      homeDir: scanHomeDir,
       runGraph: options.runGraph,
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,

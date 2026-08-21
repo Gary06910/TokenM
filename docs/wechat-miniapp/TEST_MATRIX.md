@@ -26,7 +26,12 @@ node wechat-miniapp/config/scan-secrets.mjs
 
 ## Current recovery result
 
-- Backend: 23/23 pass.
+- Backend: 29/29 pass (23 existing tests plus six direct CloudBase repository regression tests).
+- Real CloudBase smoke test: `bootstrap` and `listDesktops` returned `ok: true`.
+- Repository regression coverage verifies `{ data: document }` write calls, `_id` stripping for `.doc(id)`, transaction parity, ID mismatch rejection, strict missing-document detection, and preservation of `errCode=-1` failures.
+- Bootstrap temporary debug codes have been removed.
+- `READY_FOR_REAL_PAIRING_TEST` still requires formal deployment and security closeout.
+- **Before the first real desktop pairing, rotate `PAIRING_CODE_PEPPER` and `DEVICE_SECRET_PEPPER`; old values were exposed in screenshots.**
 - Contract/E2E harness: 38/38 pass.
 - Merged UI state file: 27/27 pass.
 - Desktop WeChat focused tests: 15/15 pass.

@@ -10,6 +10,7 @@ Page({
   onShow() {
     const tabBar = this.getTabBar && this.getTabBar();
     if (tabBar) tabBar.setData({ selected: 2 });
+    if (this.loadedAt && Date.now() - this.loadedAt < 5000) return;
     this.loadSettings(this.data.state === 'ready');
   },
 
@@ -18,6 +19,7 @@ Page({
     try {
       const result = normalizeDashboard(await api.getDashboard());
       this.setData({ state: 'ready', notificationsEnabled: result.settings.notificationsEnabled, banner: '' });
+      this.loadedAt = Date.now();
     } catch (error) {
       const shown = presentError(error);
       if (keepExisting) this.setData({ banner: `更新失败：${shown.message}` });

@@ -30,6 +30,9 @@ Page({
 
   async prepareGrant() {
     if (this.data.grantPreparing || this.data.blocked) return;
+    const existing = this.data.grantIntent;
+    if (existing && Number.isFinite(new Date(existing.expiresAt).getTime())
+      && new Date(existing.expiresAt).getTime() > Date.now()) return;
     this.setData({ grantPreparing: true, grantIntent: null });
     try {
       const result = await api.prepareSubscriptionGrant();

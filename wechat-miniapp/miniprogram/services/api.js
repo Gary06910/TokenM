@@ -10,6 +10,11 @@ const ACTIONS = new Set([
   'updateSettings', 'clearTaskHistory', 'deleteAccount',
 ]);
 
+// Coalesce identical in-flight reads when pages become visible together or
+// when a user taps refresh more than once. Writes are never deduplicated.
+const inFlightReads = new Map();
+const READ_ACTIONS = new Set(['bootstrap', 'getDashboard', 'listTasks', 'getTask', 'listDesktops']);
+
 function requestId() {
   const random = Math.random().toString(36).slice(2).padEnd(10, '0');
   const time = Date.now().toString(36);
@@ -26,6 +31,11 @@ function normalizeFailure(error) {
 
 async function callAction(action, payload = {}) {
   if (!ACTIONS.has(action)) throw { code: 'invalid_request', retryable: false };
+  const isRead = READ_ACTIONS.has(action);
+  const key = isRead ? `${action}:${JSON.stringify(payload)}` : '';
+  if (isRead && inFlightReads.has(key)) return inFlightReads.get(key);
+
+  const request = (async () => {
   const mockResult = await mockAdapter.call(action, payload);
   if (mockResult) return mockResult;
   if (!runtime.cloudBaseEnvId) throw { code: 'configuration_required', retryable: false };
@@ -40,6 +50,15 @@ async function callAction(action, payload = {}) {
   } catch (error) {
     throw normalizeFailure(error);
   }
+  })();
+  if (isRead) {
+    inFlightReads.set(key, request);
+    request.then(
+      () => inFlightReads.delete(key),
+      () => inFlightReads.delete(key),
+    );
+  }
+  return request;
 }
 
 module.exports = {

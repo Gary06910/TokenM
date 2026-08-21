@@ -1,8 +1,16 @@
 'use strict';
 
 function isMissingDocument(error) {
-  const text = `${error?.errCode || ''} ${error?.code || ''} ${error?.message || ''}`.toLowerCase();
-  return text.includes('document not exist') || text.includes('document_not_exist') || text.includes('document not found') || text.includes('does not exist') || error?.errCode === -1;
+  const text =
+    `${error?.errCode || ''} ${error?.code || ''} ${error?.message || ''} ${error?.errMsg || ''}`
+      .toLowerCase();
+
+  return (
+    text.includes('document not exist') ||
+    text.includes('document_not_exist') ||
+    text.includes('document not found') ||
+    text.includes('does not exist')
+  );
 }
 
 function buildCloudWhere(command, spec = {}) {
@@ -39,19 +47,56 @@ function createCloudBaseRepository(cloud) {
     return {
       async get(collection, id) {
         try {
-          const result = await source.collection(collection).doc(id).get();
+          const result = await source
+            .collection(collection)
+            .doc(id)
+            .get();
+
           return result?.data || null;
         } catch (error) {
           if (isMissingDocument(error)) return null;
           throw error;
         }
       },
+
       async set(collection, id, data) {
-        await source.collection(collection).doc(id).set({ data });
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw new TypeError('document data must be an object');
+        }
+
+        if (data._id !== undefined && data._id !== id) {
+          throw new Error('document id mismatch');
+        }
+
+        const { _id, ...document } = data;
+
+        await source
+          .collection(collection)
+          .doc(id)
+          .set({
+            data: document
+          });
       },
+
       async update(collection, id, data) {
-        await source.collection(collection).doc(id).update({ data });
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw new TypeError('document data must be an object');
+        }
+
+        if (data._id !== undefined && data._id !== id) {
+          throw new Error('document id mismatch');
+        }
+
+        const { _id, ...document } = data;
+
+        await source
+          .collection(collection)
+          .doc(id)
+          .update({
+            data: document
+          });
       },
+
       async delete(collection, id) {
         try {
           await source.collection(collection).doc(id).remove();
@@ -59,22 +104,43 @@ function createCloudBaseRepository(cloud) {
           if (!isMissingDocument(error)) throw error;
         }
       },
+
       async query(collection, spec = {}) {
-        const result = await cloudQuery(source.collection(collection), command, spec).get();
+        const result = await cloudQuery(
+          source.collection(collection),
+          command,
+          spec
+        ).get();
+
         return result?.data || [];
       },
+
       async count(collection, spec = {}) {
-        const result = await cloudQuery(source.collection(collection), command, { ...spec, limit: undefined, orderBy: [] }).count();
+        const result = await cloudQuery(
+          source.collection(collection),
+          command,
+          {
+            ...spec,
+            limit: undefined,
+            orderBy: []
+          }
+        ).count();
+
         return result?.total || 0;
       }
     };
   }
 
   const root = adapter(db);
+
   return {
     ...root,
+
     async transaction(callback) {
-      return db.runTransaction(async (transaction) => callback(adapter(transaction)));
+      return db.runTransaction(async (transaction) => {
+        const tx = adapter(transaction);
+        return callback(tx);
+      });
     }
   };
 }

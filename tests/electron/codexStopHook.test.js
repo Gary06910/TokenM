@@ -37,7 +37,6 @@ test('merges and exactly disables the Token M Stop hook while preserving other h
   };
   fs.writeFileSync(configPath, `${JSON.stringify(original, null, 2)}\n`);
 
-  const selected = process.platform === 'win32' ? 'token-m-win' : 'token-m-posix';
   const enabled = enableCodexStopHook({
     codexHome,
     command: 'token-m-posix',
@@ -53,16 +52,47 @@ test('merges and exactly disables the Token M Stop hook while preserving other h
   assert.equal(merged.custom.retained, true);
   assert.equal(merged.hooks.Start[0].hooks[0].command, 'start-tool');
   assert.equal(merged.hooks.Stop.length, 2);
-  assert.equal(merged.hooks.Stop[1].hooks[0].command, selected);
+  assert.equal(merged.hooks.Stop[1].hooks[0].command, 'token-m-posix');
+  assert.equal(merged.hooks.Stop[1].hooks[0].commandWindows, 'token-m-win');
   assert.equal(merged.hooks.Stop[1].hooks[0].timeout, 5);
 
-  const duplicate = enableCodexStopHook({ codexHome, command: selected, commandWindows: selected });
+  const duplicate = enableCodexStopHook({ codexHome, command: 'token-m-posix', commandWindows: 'token-m-win' });
   assert.equal(duplicate.backupPath, null);
   assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).hooks.Stop.length, 2);
 
-  const disabled = disableCodexStopHook({ codexHome, commandIdentity: selected });
+  const disabled = disableCodexStopHook({
+    codexHome,
+    commandIdentity: { command: 'token-m-posix', commandWindows: 'token-m-win' }
+  });
   assert.equal(disabled.enabled, false);
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), original);
+});
+
+test('migrates the legacy Windows shell command in place without adding a duplicate Stop hook', (t) => {
+  const { codexHome, files } = fixture(t);
+  const configPath = path.join(codexHome, 'hooks.json');
+  files.add(configPath);
+  const legacy = 'set "ELECTRON_RUN_AS_NODE=1"&&"C:\\Program Files (x86)\\Token M\\electron.exe"';
+  fs.writeFileSync(configPath, `${JSON.stringify({
+    hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: legacy, timeout: 5 }] }] }
+  }, null, 2)}\n`);
+
+  const state = enableCodexStopHook({
+    codexHome,
+    command: 'powershell.exe -EncodedCommand stable',
+    commandWindows: 'powershell.exe -EncodedCommand stable',
+    legacyCommands: [legacy]
+  });
+  files.add(state.backupPath);
+  assert.equal(state.enabled, true);
+  const stop = JSON.parse(fs.readFileSync(configPath, 'utf8')).hooks.Stop;
+  assert.equal(stop.length, 1);
+  assert.deepEqual(stop[0].hooks[0], {
+    type: 'command',
+    command: 'powershell.exe -EncodedCommand stable',
+    commandWindows: 'powershell.exe -EncodedCommand stable',
+    timeout: 5
+  });
 });
 
 test('reports malformed files without overwriting them', (t) => {

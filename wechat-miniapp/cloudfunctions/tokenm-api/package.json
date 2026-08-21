@@ -12,6 +12,6 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "wx-server-sdk": "~3.0.1"
+    "wx-server-sdk": "4.0.2"
   }
 }

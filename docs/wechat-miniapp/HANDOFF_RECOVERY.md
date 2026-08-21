@@ -16,7 +16,7 @@
 
 ## 2. Main repository safety state
 
-- path：`D:\Program Files (x86)\TokenM\token-monitor-main`
+- historical path：`D:\Program Files (x86)\TokenM\token-monitor-main` (archived recovery context; not a runtime dependency)
 - branch：`main`
 - HEAD：`71c82bda0f975b110453e21585582c4a3e3ba127`
 - 状态：dirty；16 个已修改文件，多个用户已有 untracked 文件/目录（含 `spikes/`），未发现 staged changes。
@@ -74,7 +74,7 @@ node --test tests/electron/wechatClient.test.js tests/electron/wechatCredential.
 15 pass, 0 fail
 ```
 
-Integration must manually reconcile the shared dirty-main counterparts (`tokenMNotificationRuntime.js`, renderer/settings, credential store) and confirm Android/Web Push remains independent. No second Codex Hook was found in the Worker C implementation.
+Integration must manually reconcile the shared dirty-main counterparts (`tokenMNotificationRuntime.js`, renderer/settings, credential store) and confirm legacy mobile notification route remains independent. No second Codex Hook was found in the Worker C implementation.
 
 ## 7. Worker D status
 
@@ -162,6 +162,16 @@ No Worker reported a `CONTRACT_CHANGE_REQUEST`. The UI error mapping is an imple
 7. Perform final security, platform, and native UI/taste audits; fix all Critical/Major findings before readiness claims.
 
 ## Recovery update (2026-08-20)
+
+### Pre-deployment CloudBase repository closeout (2026-08-20)
+
+- Real CloudBase smoke tests completed successfully: `bootstrap` and `listDesktops` both returned `ok: true`.
+- CloudBase repository writes must use `set({ data: document })` / `update({ data: document })`; when using `.doc(id)`, the write payload excludes `_id`.
+- `errCode=-1` is not sufficient evidence of a missing document; only explicit document-not-found semantics return `null`.
+- Bootstrap-only diagnostic stages and temporary diagnostic response codes were removed; ordinary non-`AppError` failures remain normalized by the application layer as `internal_error`.
+- Added direct fake-CloudBase repository regression coverage for root/transaction set and update, `_id` stripping, ID mismatch, `errCode=-1`, and explicit missing documents.
+- `READY_FOR_REAL_PAIRING_TEST` still requires formal deployment and security closeout.
+- **Before the first real desktop pairing, rotate `PAIRING_CODE_PEPPER` and `DEVICE_SECRET_PEPPER`; old values were exposed in screenshots.** Never record the actual pepper values in repository documentation.
 
 - A's `services/api.js` now preserves a Cloud Function `{ ok: false, error: ... }` envelope; a regression test covers `pairing_invalid`. UI-focused coverage is now 10/10 in A's worktree and 27/27 in the merged UI state file.
 - E's `ContractModel.snapshot()` now clones map values through explicit callbacks. Contract + P0 E2E coverage is now 38/38 in E's worktree; the merged integration matrix includes the UI state checks.

@@ -5,43 +5,6 @@ import { aggregateDevices, mergeDeviceRecord, aggregateHistory } from './shared/
 import { DEFAULT_STALE_AFTER_MS } from './shared/syncUploadInterval.js';
 import { deviceHistoryRevision, historyPreview, historyRevision } from './shared/history.js';
 import hubBuildIdentity from './shared/hubBuildIdentity.js';
-import managed from './managed.cjs';
-import { buildPushPayload } from '@block65/webcrypto-web-push';
-
-const { bearerCapability, createTenantDO, parseCapability } = managed;
-
-function classifyPushStatus(status) {
-  if (status === 201 || status === 202) return 'delivered';
-  if (status === 404 || status === 410) return 'expired';
-  if (status === 429 || status >= 500) return 'pending';
-  if (status >= 400 && status < 500) return 'terminal';
-  return 'pending';
-}
-
-async function sendWebPush(subscription, message, env, fetchImpl = fetch) {
-  const vapid = {
-    subject: String(env.TOKEN_M_VAPID_SUBJECT || ''),
-    publicKey: String(env.TOKEN_M_VAPID_PUBLIC_KEY || ''),
-    privateKey: String(env.TOKEN_M_VAPID_PRIVATE_KEY || '')
-  };
-  if (!vapid.subject || !vapid.publicKey || !vapid.privateKey) return { classification: 'pending', status: 0, error: 'vapid_not_configured' };
-  try {
-    const init = await buildPushPayload({
-      data: JSON.stringify(message),
-      options: { ttl: 300, topic: String(message.eventId || '').slice(-32) }
-    }, subscription, vapid);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    let response;
-    try { response = await fetchImpl(subscription.endpoint, { ...init, signal: controller.signal }); }
-    finally { clearTimeout(timeout); }
-    return { classification: classifyPushStatus(response.status), status: response.status };
-  } catch (_) {
-    return { classification: 'pending', status: 0, error: 'push_network_error' };
-  }
-}
-
-const TenantDO = createTenantDO(sendWebPush);
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -85,7 +48,6 @@ function sseFormat(event, data) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/v1/')) return routeManagedRequest(request, env);
     if (url.pathname.startsWith('/api/')) {
       if (request.method === 'OPTIONS') return textResponse(204, '');
       const id = env.HUB.idFromName('hub');
@@ -95,94 +57,6 @@ export default {
     return jsonResponse(404, { error: 'not_found' });
   }
 };
-
-async function routeManagedRequest(request, env) {
-  const url = new URL(request.url);
-  const origin = request.headers.get('origin');
-  if (origin && origin !== url.origin) {
-    return new Response(JSON.stringify({ error: 'origin_not_allowed', message: 'Cross-origin browser requests are not allowed' }), {
-      status: 403,
-      headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
-    });
-  }
-  if (request.method === 'OPTIONS') {
-    const headers = { 'cache-control': 'no-store', 'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization,content-type,x-token-m-enrollment-secret' };
-    if (origin === url.origin) { headers['access-control-allow-origin'] = origin; headers.vary = 'Origin'; }
-    return new Response(null, { status: 204, headers });
-  }
-
-  let tenantId;
-  if (url.pathname === '/v1/desktop/enroll') {
-    if (request.method !== 'POST') return managedRouterError(405, 'method_not_allowed', 'Method not allowed');
-    const expected = String(env.TOKEN_M_ENROLLMENT_SECRET || '');
-    const presented = request.headers.get('x-token-m-enrollment-secret') || '';
-    if (!expected || !safeStringEqual(expected, presented)) return managedRouterError(403, 'invalid_enrollment', 'Enrollment capability is invalid');
-    tenantId = randomTenantId();
-  } else if (url.pathname === '/v1/pairings/redeem') {
-    if (request.method !== 'POST') return managedRouterError(405, 'method_not_allowed', 'Method not allowed');
-    let body;
-    try { body = await readRouterJson(request.clone(), 4096); } catch (error) { return managedRouterError(error.status || 400, error.code || 'bad_request', error.message || 'Invalid JSON body'); }
-    tenantId = parseCapability(body?.token, 'pair')?.tenantId;
-    if (!tenantId) return managedRouterError(400, 'invalid_pairing', 'Pairing token is invalid or expired');
-  } else {
-    const expected = url.pathname.startsWith('/v1/mobile/') || url.pathname === '/v1/mobile' ? 'mobile' : 'desktop';
-    const capability = bearerCapability(request, expected);
-    if (!capability) return managedRouterError(401, 'unauthorized', `${expected === 'mobile' ? 'Mobile' : 'Desktop'} credential is invalid`);
-    tenantId = capability.tenantId;
-  }
-
-  if (!env.TENANTS) return managedRouterError(503, 'managed_not_configured', 'Managed tenant storage is not configured');
-  const headers = new Headers(request.headers);
-  headers.set('x-token-m-tenant-id', tenantId);
-  const forwarded = new Request(request, { headers });
-  return env.TENANTS.get(env.TENANTS.idFromName(`tenant:${tenantId}`)).fetch(forwarded);
-}
-
-function randomTenantId() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function managedRouterError(status, error, message) {
-  return new Response(JSON.stringify({ error, message }), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
-}
-
-async function readRouterJson(request, maxBytes) {
-  if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) throw Object.assign(new Error('JSON content type required'), { status: 415, code: 'unsupported_media_type' });
-  const reader = request.body?.getReader();
-  if (!reader) throw Object.assign(new Error('Invalid JSON body'), { status: 400, code: 'bad_request' });
-  const chunks = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw Object.assign(new Error('Request body is too large'), { status: 413, code: 'body_too_large' });
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  let value;
-  try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { throw Object.assign(new Error('Invalid JSON body'), { status: 400, code: 'bad_request' }); }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('JSON body must be an object'), { status: 400, code: 'bad_request' });
-  return value;
-}
-
-function safeStringEqual(left, right) {
-  const a = new TextEncoder().encode(String(left));
-  const b = new TextEncoder().encode(String(right));
-  let mismatch = a.length ^ b.length;
-  const size = Math.max(a.length, b.length);
-  for (let index = 0; index < size; index += 1) mismatch |= (a[index % (a.length || 1)] || 0) ^ (b[index % (b.length || 1)] || 0);
-  return mismatch === 0;
-}
 
 export class HubDO {
   constructor(state, env) {
@@ -440,4 +314,4 @@ function publicPeriods(periods) {
   }));
 }
 
-export { classifyPushStatus, publicPeriods, routeManagedRequest, sendWebPush, TenantDO };
+export { publicPeriods };

@@ -7,7 +7,10 @@ const { normalizeDesktop, presentError } = require('../../services/presentation'
 Page({
   data: { state: 'loading', active: [], revoked: [], showRevoked: false, error: null, banner: '' },
 
-  onShow() { this.loadDesktops(this.data.active.length > 0); },
+  onShow() {
+    if (this.loadedAt && Date.now() - this.loadedAt < 5000) return;
+    this.loadDesktops(this.data.active.length > 0);
+  },
 
   async loadDesktops(keepExisting = false) {
     if (!keepExisting) this.setData({ state: 'loading', error: null });
@@ -20,6 +23,7 @@ Page({
         revoked: desktops.filter((item) => item.status === 'revoked'),
         banner: '',
       });
+      this.loadedAt = Date.now();
     } catch (error) {
       const presented = presentError(error);
       if (keepExisting && this.data.active.length) this.setData({ banner: `更新失败：${presented.message}` });

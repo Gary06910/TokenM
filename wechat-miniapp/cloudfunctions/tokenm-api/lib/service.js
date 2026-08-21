@@ -112,6 +112,7 @@ function createService(dependencies) {
     const ownerId = ownerIdFor(identity.appId, identity.openid);
     const result = await repo.transaction(async (tx) => {
       let user = await tx.get(COLLECTIONS.users, ownerId);
+
       if (!user) {
         user = {
           _id: ownerId,
@@ -127,17 +128,26 @@ function createService(dependencies) {
         };
         await tx.set(COLLECTIONS.users, ownerId, user);
       }
+
       if (user.status !== 'active') throw new AppError('unauthorized');
+
       let state = await tx.get(COLLECTIONS.states, ownerId);
+
       if (!state) {
         state = makeNotificationState(ownerId, config.initialQuota, timestamp);
         await tx.set(COLLECTIONS.states, ownerId, state);
       }
+
       return { user, state };
     });
+
     const dashboard = await dashboardFor(ownerId, result.user, result.state);
+
     return {
-      user: { id: ownerId, createdAt: iso(result.user.createdAt) },
+      user: {
+        id: ownerId,
+        createdAt: iso(result.user.createdAt)
+      },
       ...dashboard
     };
   }

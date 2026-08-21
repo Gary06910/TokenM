@@ -182,7 +182,9 @@ test('AUTH-01 issues a one-time credential and authenticates only its HMAC', asy
 test('AUTH-02 rejects tampered credentials and revocation is immediate', async () => {
   const h = harness();
   const paired = await pair(h);
-  assert.equal(await errorCode(h.service.getDesktopStatus(`${paired.credential.slice(0, -1)}A`, REQUEST_ID)), 'unauthenticated');
+  const last = paired.credential.slice(-1);
+  const tampered = `${paired.credential.slice(0, -1)}${last === 'A' ? 'B' : 'A'}`;
+  assert.equal(await errorCode(h.service.getDesktopStatus(tampered, REQUEST_ID)), 'unauthenticated');
   const unbound = await h.service.revokeDesktopByOwner(USER_A, paired.desktop.desktopId, REQUEST_ID);
   assert.equal(unbound.alreadyRevoked, false);
   const duplicate = await h.service.revokeDesktopByOwner(USER_A, paired.desktop.desktopId, REQUEST_ID);
@@ -370,10 +372,22 @@ test('DELETE-01 history becomes invisible immediately and account deletion revok
   assert.equal(await errorCode(h.service.getDashboard(USER_A)), 'unauthorized');
 });
 
-test('miniapp dispatcher reads only server identity and rejects unknown input keys', async () => {
+test('miniapp dispatcher discards confirmed platform fields and rejects unknown business keys', async () => {
   const h = harness();
-  const ok = await h.app.invokeMini({ action: 'bootstrap', requestId: REQUEST_ID }, USER_A);
+  const ok = await h.app.invokeMini({
+    action: 'bootstrap',
+    requestId: REQUEST_ID,
+    tcbContext: { appId: 'untrusted-event-value' },
+    userInfo: { nickName: 'untrusted-event-value' },
+  }, USER_A);
   assert.equal(ok.ok, true);
+  const desktops = await h.app.invokeMini({
+    action: 'listDesktops',
+    requestId: REQUEST_ID,
+    tcbContext: {},
+    userInfo: {},
+  }, USER_A);
+  assert.deepEqual(desktops.items, []);
   const rejected = await h.app.invokeMini({ action: 'getDashboard', requestId: REQUEST_ID, userId: ok.user.id }, USER_B);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error.code, 'invalid_request');

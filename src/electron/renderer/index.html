@@ -1433,11 +1433,11 @@
 
         <div class="settings-group settings-collapsible-group settings-notifications-group">
           <button class="settings-section-toggle" type="button" data-settings-section="notifications" aria-expanded="false" aria-controls="notificationsSettingsDetails">
-            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-notifications" aria-hidden="true"></span><span data-i18n="settings.notifications.title">Phone notifications</span></span>
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-notifications" aria-hidden="true"></span><span data-i18n="settings.notifications.title">WeChat notifications</span></span>
             <span class="settings-section-meta"><span id="notificationsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="notificationsSettingsDetails" class="settings-section-details hidden">
-            <p class="settings-note" data-i18n="settings.notifications.description">Get a phone notification when a Codex turn completes. Notification events contain only identifiers, the project folder name, and timing.</p>
+            <p class="settings-note" data-i18n="settings.notifications.description">Receive Codex completion notifications in the Token M WeChat Mini Program.</p>
             <div class="notification-wechat-card">
               <div class="notification-installations-heading" data-i18n="settings.notifications.wechat.title">WeChat notifications</div>
               <p class="settings-note" data-i18n="settings.notifications.wechat.description">Pair with the Token M Mini Program using its six-digit code. Privacy mode is used by default.</p>
@@ -1457,26 +1457,6 @@
                 <p class="settings-note" data-i18n="settings.notifications.wechat.renameHint">Rename this computer from the Mini Program's computer list.</p>
                 <div class="settings-actions"><button id="notificationWeChatUnpairButton" type="button" data-i18n="settings.notifications.wechat.unpair">Unpair this computer</button></div>
               </div>
-            </div>
-            <div id="notificationEnrollmentFields" class="notification-enrollment-fields">
-              <label><span data-i18n="settings.notifications.cloudUrl">Token M cloud URL</span><input id="notificationCloudUrlInput" type="url" inputmode="url" spellcheck="false" placeholder="https://example.workers.dev" /></label>
-              <label><span data-i18n="settings.notifications.enrollmentCode">Private beta enrollment code</span><input id="notificationEnrollmentCodeInput" type="password" autocomplete="off" spellcheck="false" /></label>
-              <div class="settings-actions"><button id="notificationEnrollButton" type="button" data-i18n="settings.notifications.enroll">Set up notifications</button></div>
-            </div>
-            <div id="notificationConfiguredFields" class="hidden">
-              <div id="notificationDeviceStatus" class="notification-device-status"></div>
-              <div class="notification-pairing-card">
-                <div class="settings-actions">
-                  <button id="notificationPairButton" type="button" data-i18n="settings.notifications.pairPhone">Pair a phone</button>
-                  <button id="notificationTestButton" type="button" data-i18n="settings.notifications.sendTest">Send test notification</button>
-                </div>
-                <div id="notificationQrPanel" class="notification-qr-panel hidden">
-                  <img id="notificationQrImage" alt="Phone pairing QR code" />
-                  <p id="notificationPairingExpiry" class="settings-note"></p>
-                </div>
-              </div>
-              <div class="notification-installations-heading" data-i18n="settings.notifications.pairedDevices">Paired devices</div>
-              <div id="notificationInstallationList" class="notification-installation-list"></div>
             </div>
             <div class="notification-hook-card">
               <div><strong data-i18n="settings.notifications.codexHook">Codex Stop hook</strong><p id="notificationHookStatus" class="settings-note"></p></div>
@@ -1627,7 +1607,6 @@
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
-    <script src="../../../node_modules/qrcode-generator/qrcode.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
     <script src="fixedPeriodRanges.js"></script>

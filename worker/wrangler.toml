@@ -3,34 +3,20 @@ main = "src/index.js"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
 
+workers_dev = true
+preview_urls = false
+
 [[durable_objects.bindings]]
 name = "HUB"
 class_name = "HubDO"
-
-[[durable_objects.bindings]]
-name = "TENANTS"
-class_name = "TenantDO"
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["HubDO"]
 
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["TenantDO"]
-
-[assets]
-directory = "./public"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-
 [vars]
 STALE_AFTER_MS = "600000"
-TOKEN_M_VAPID_PUBLIC_KEY = ""
 
 # Set the shared secret with:
 #   wrangler secret put TOKEN_MONITOR_SECRET
 # Leave it unset only for trusted/private deployments.
-# Managed notifications additionally require TOKEN_M_ENROLLMENT_SECRET,
-# TOKEN_M_CREDENTIAL_PEPPER, TOKEN_M_VAPID_PRIVATE_KEY and
-# TOKEN_M_VAPID_SUBJECT. TOKEN_M_VAPID_PUBLIC_KEY is a public variable.

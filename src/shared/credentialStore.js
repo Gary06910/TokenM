@@ -30,7 +30,6 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   ollamaCookie: ['providers', 'ollama', 'cookie'],
   thirdPartyProfiles: ['providers', 'thirdparty', 'profiles'],
-  tokenMCloudCredential: ['tokenM', 'cloudCredential'],
   tokenMWeChatCredential: ['tokenM', 'weChatCredential']
 });
 

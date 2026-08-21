@@ -19,6 +19,15 @@ const MINI_SCHEMAS = {
   deleteAccount: { allowed: ['action', 'requestId', 'confirmation'], required: ['action', 'requestId', 'confirmation'] }
 };
 
+const MINI_PLATFORM_EVENT_FIELDS = new Set(['tcbContext', 'userInfo']);
+
+function stripMiniPlatformFields(event) {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
+  const proto = Object.getPrototypeOf(event);
+  if (proto !== Object.prototype && proto !== null) return event;
+  return Object.fromEntries(Object.entries(event).filter(([key]) => !MINI_PLATFORM_EVENT_FIELDS.has(key)));
+}
+
 function lowerHeaders(headers = {}) {
   const result = {};
   for (const [key, value] of Object.entries(headers || {})) result[String(key).toLowerCase()] = Array.isArray(value) ? value[0] : String(value);
@@ -69,10 +78,27 @@ function gatewayResponse(statusCode, payload) {
   };
 }
 
+function normalizeGatewayPath(value) {
+  const path = String(value || '');
+
+  if (
+    path === '/pair'
+    || path === '/status'
+    || path === '/events'
+    || path === '/unpair-self'
+  ) {
+    return `/v1/desktop${path}`;
+  }
+
+  return path;
+}
+
 function gatewayDetails(event) {
   return {
     method: String(event.httpMethod || event.requestContext?.http?.method || '').toUpperCase(),
-    path: String(event.path || event.rawPath || event.requestContext?.http?.path || ''),
+    path: normalizeGatewayPath(
+  event.path || event.rawPath || event.requestContext?.http?.path || ''
+),
     headers: lowerHeaders(event.headers),
     ip: String(event.requestContext?.http?.sourceIp || event.requestContext?.sourceIp || event.headers?.['x-forwarded-for'] || event.headers?.['X-Forwarded-For'] || 'unknown').split(',')[0].trim(),
     userAgent: String(event.requestContext?.http?.userAgent || event.headers?.['user-agent'] || event.headers?.['User-Agent'] || '').slice(0, 160)
@@ -85,41 +111,42 @@ function isHttpEvent(event) {
 
 function createApplication({ service, logger = { info() {}, warn() {}, error() {} }, randomBytes }) {
   async function invokeMini(event, identity) {
-    let reqId = typeof event?.requestId === 'string' ? event.requestId : generateRequestId(randomBytes);
+    const payload = stripMiniPlatformFields(event);
+    let reqId = typeof payload?.requestId === 'string' ? payload.requestId : generateRequestId(randomBytes);
     try {
-      if (!event || typeof event.action !== 'string' || !MINI_SCHEMAS[event.action]) throw new AppError('invalid_request');
-      const schema = MINI_SCHEMAS[event.action];
-      assertExactKeys(event, schema.allowed, schema.required);
-      reqId = assertRequestId(event.requestId);
+      if (!payload || typeof payload.action !== 'string' || !MINI_SCHEMAS[payload.action]) throw new AppError('invalid_request');
+      const schema = MINI_SCHEMAS[payload.action];
+      assertExactKeys(payload, schema.allowed, schema.required);
+      reqId = assertRequestId(payload.requestId);
       let result;
-      switch (event.action) {
+      switch (payload.action) {
         case 'bootstrap': result = await service.bootstrap(identity); break;
         case 'getDashboard': result = await service.getDashboard(identity); break;
-        case 'listTasks': result = await service.listTasks(identity, { cursor: event.cursor, limit: event.limit ?? 20 }); break;
-        case 'getTask': result = await service.getTask(identity, event.taskId); break;
+        case 'listTasks': result = await service.listTasks(identity, { cursor: payload.cursor, limit: payload.limit ?? 20 }); break;
+        case 'getTask': result = await service.getTask(identity, payload.taskId); break;
         case 'listDesktops': result = await service.listDesktops(identity); break;
         case 'createPairingCode': result = await service.createPairingCode(identity, reqId); break;
-        case 'renameDesktop': result = await service.renameDesktop(identity, event.desktopId, event.name); break;
+        case 'renameDesktop': result = await service.renameDesktop(identity, payload.desktopId, payload.name); break;
         case 'unbindDesktop':
-          if (event.confirmation !== 'UNBIND') throw new AppError('invalid_request');
-          result = await service.revokeDesktopByOwner(identity, event.desktopId, reqId);
+          if (payload.confirmation !== 'UNBIND') throw new AppError('invalid_request');
+          result = await service.revokeDesktopByOwner(identity, payload.desktopId, reqId);
           break;
         case 'prepareSubscriptionGrant': result = await service.prepareSubscriptionGrant(identity, reqId); break;
-        case 'recordSubscriptionOutcome': result = await service.recordSubscriptionOutcome(identity, event.grantIntentId, event.result, reqId); break;
-        case 'updateSettings': result = await service.updateSettings(identity, event.notificationsEnabled); break;
+        case 'recordSubscriptionOutcome': result = await service.recordSubscriptionOutcome(identity, payload.grantIntentId, payload.result, reqId); break;
+        case 'updateSettings': result = await service.updateSettings(identity, payload.notificationsEnabled); break;
         case 'clearTaskHistory':
-          if (event.confirmation !== 'CLEAR') throw new AppError('invalid_request');
+          if (payload.confirmation !== 'CLEAR') throw new AppError('invalid_request');
           result = await service.clearTaskHistory(identity);
           break;
         case 'deleteAccount':
-          if (event.confirmation !== 'DELETE') throw new AppError('invalid_request');
+          if (payload.confirmation !== 'DELETE') throw new AppError('invalid_request');
           result = await service.deleteAccount(identity, reqId);
           break;
         default: throw new AppError('invalid_request');
       }
       return { ok: true, ...result, requestId: reqId };
     } catch (error) {
-      logger.warn({ requestId: reqId, route: event?.action || 'mini_unknown', code: error.code || 'internal_error' });
+      logger.warn({ requestId: reqId, route: payload?.action || 'mini_unknown', code: error.code || 'internal_error' });
       return errorEnvelope(error, reqId);
     }
   }

@@ -16,7 +16,8 @@ Page({
   onShow() {
     const tabBar = this.getTabBar && this.getTabBar();
     if (tabBar) tabBar.setData({ selected: 0 });
-    this.loadDashboard(this.data.dashboard !== null);
+    const fresh = this.dashboardLoadedAt && Date.now() - this.dashboardLoadedAt < 5000;
+    if (!fresh) this.loadDashboard(this.data.dashboard !== null);
   },
 
   onPullDownRefresh() {
@@ -32,6 +33,7 @@ Page({
         ? desktopsResult.items.filter((item) => item.status !== 'revoked').slice(0, 2).map(normalizeDesktop)
         : [];
       getApp().globalData.dashboard = dashboard;
+      this.dashboardLoadedAt = Date.now();
       this.setData({ state: 'ready', dashboard, desktops, banner: '', error: null });
     } catch (error) {
       const presented = presentError(error);

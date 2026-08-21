@@ -1766,7 +1766,12 @@ test('clientDataDirPresence requires an actual VS Code Copilot chat source', () 
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
-    const { clientDataDirPresence } = freshCollector();
+    const { clientDataDirPresence, clientDiagnosticRoots } = freshCollector();
+    const outsideFixture = clientDiagnosticRoots('copilot').copilot.filter(({ dir }) => {
+      const relative = path.relative(tmp, dir);
+      return path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`);
+    });
+    assert.deepEqual(outsideFixture, [], 'Copilot probes must not escape the fixture home');
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: false });
     fs.mkdirSync(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'copilot-workspace', 'chatSessions'), { recursive: true });
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });

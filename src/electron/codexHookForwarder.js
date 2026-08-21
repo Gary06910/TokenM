@@ -5,9 +5,36 @@ const { readRegularFileNoFollow } = require('../shared/credentialStore');
 
 const MAX_STDIN_BYTES = 64 * 1024;
 const MAX_RUNTIME_BYTES = 8 * 1024;
+const MAX_RESPONSE_BYTES = 8 * 1024;
 
-function finish() {
+function finishSuccess() {
   try { process.stdout.write('{}\n'); } catch (_) {}
+}
+
+function failure(stage, code, cause, detail = null) {
+  const error = new Error(code, { cause });
+  error.stage = stage;
+  error.code = code;
+  error.detail = detail;
+  return error;
+}
+
+function safeCode(value, fallback = 'unknown_error') {
+  const candidate = String(value || fallback);
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(candidate) ? candidate : fallback;
+}
+
+function reportFailure(error) {
+  const fields = [
+    'stage=' + safeCode(error?.stage, 'unknown'),
+    'code=' + safeCode(error?.code, error?.name || 'unknown_error')
+  ];
+  if (Number.isInteger(error?.status)) fields.push(`status=${error.status}`);
+  if (error?.detail) fields.push(`detail=${safeCode(error.detail)}`);
+  if (Array.isArray(error?.inputKeys) && error.inputKeys.length > 0) {
+    fields.push(`input_fields=${error.inputKeys.join(',')}`);
+  }
+  try { process.stderr.write(`[token-m-hook] ${fields.join(' ')}\n`); } catch (_) {}
 }
 
 function readBoundedStdin() {
@@ -52,25 +79,66 @@ function post(runtime, body) {
       },
       timeout: 1_500
     }, (response) => {
-      response.resume();
-      response.on('end', resolve);
+      const chunks = [];
+      let size = 0;
+      response.on('data', (chunk) => {
+        size += chunk.length;
+        if (size <= MAX_RESPONSE_BYTES) chunks.push(chunk);
+      });
+      response.on('end', () => {
+        if (size > MAX_RESPONSE_BYTES) {
+          reject(failure('response-read', 'response_too_large'));
+          return;
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve();
+          return;
+        }
+        let detail = null;
+        try { detail = JSON.parse(Buffer.concat(chunks).toString('utf8'))?.error; } catch (_) {}
+        const error = failure('request', `http_${response.statusCode}`, null, detail);
+        error.status = response.statusCode;
+        reject(error);
+      });
     });
-    request.on('timeout', () => request.destroy(new Error('timeout')));
-    request.on('error', reject);
+    request.on('timeout', () => request.destroy(failure('request', 'ETIMEDOUT')));
+    request.on('error', (error) => {
+      if (error?.stage) reject(error);
+      else reject(failure('request', safeCode(error?.code, 'connection_failure'), error));
+    });
     request.end(body);
   });
 }
 
 async function run() {
   const runtimePath = process.argv[2];
-  if (!runtimePath) return;
-  const [runtime, body] = await Promise.all([Promise.resolve().then(() => readRuntime(runtimePath)), readBoundedStdin()]);
-  JSON.parse(body.toString('utf8'));
-  await post(runtime, body);
+  if (!runtimePath) throw failure('arguments', 'missing_runtime_path');
+  let body;
+  try { body = await readBoundedStdin(); }
+  catch (error) { throw failure('stdin-read', safeCode(error?.code, error?.message), error); }
+  let input;
+  try { input = JSON.parse(body.toString('utf8')); }
+  catch (error) { throw failure('stdin-parse', 'json_parse_failure', error); }
+  const inputKeys = input && typeof input === 'object' && !Array.isArray(input)
+    ? Object.keys(input).filter((key) => /^[A-Za-z0-9_.-]{1,80}$/.test(key)).sort().slice(0, 32)
+    : [];
+  try {
+    const runtime = readRuntime(runtimePath);
+    await post(runtime, body);
+  } catch (error) {
+    const wrapped = error?.stage
+      ? error
+      : failure('runtime-read', safeCode(error?.code, error?.message === 'invalid_runtime' ? 'invalid_runtime' : error?.name), error);
+    wrapped.inputKeys = inputKeys;
+    throw wrapped;
+  }
 }
 
 if (require.main === module) {
-  run().catch(() => {}).finally(finish);
+  run().then(finishSuccess, (error) => {
+    reportFailure(error);
+    process.exitCode = 1;
+  });
 }
 
-module.exports = { post, readRuntime };
+module.exports = { post, readRuntime, run };

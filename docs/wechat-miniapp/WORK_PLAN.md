@@ -31,7 +31,6 @@ Workers：GPT-5.6 Sol / high
 ?? spikes/
 ?? tests/electron/codexHookForwarder.test.js
 ?? tests/fixtures/codex-home/
-?? tests/pwa/serviceWorkerPush.test.js
 ?? tests/shared/codexUsageRegression.test.js
 ```
 
@@ -40,7 +39,7 @@ Workers：GPT-5.6 Sol / high
 Baseline focused tests：34 pass / 0 fail：
 
 ```text
-node --test tests/shared/codexCompletion.test.js tests/electron/notificationOutbox.test.js tests/electron/tokenMCloudClient.test.js tests/electron/tokenMNotificationsIntegration.test.js tests/worker/managedNotifications.test.js
+node --test tests/shared/codexCompletion.test.js tests/electron/notificationOutbox.test.js tests/electron/wechatClient.test.js tests/electron/wechatOutbox.test.js tests/electron/wechatPayload.test.js
 ```
 
 ## 2. Phase gates

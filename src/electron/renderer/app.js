@@ -318,7 +318,6 @@ state.limitProviderRenderSignature = '';
 state.limitPanelRenderSignature = '';
 state.settingsPushRevision = 0;
 state.notificationStatus = null;
-state.notificationPairing = null;
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -453,22 +452,10 @@ Object.assign(els, {
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
   notificationsSettingsSummary: document.getElementById('notificationsSettingsSummary'),
-  notificationEnrollmentFields: document.getElementById('notificationEnrollmentFields'),
-  notificationConfiguredFields: document.getElementById('notificationConfiguredFields'),
-  notificationCloudUrlInput: document.getElementById('notificationCloudUrlInput'),
-  notificationEnrollmentCodeInput: document.getElementById('notificationEnrollmentCodeInput'),
-  notificationEnrollButton: document.getElementById('notificationEnrollButton'),
-  notificationDeviceStatus: document.getElementById('notificationDeviceStatus'),
   notificationHookStatus: document.getElementById('notificationHookStatus'),
   notificationTrustNote: document.getElementById('notificationTrustNote'),
   notificationEnableHookButton: document.getElementById('notificationEnableHookButton'),
   notificationDisableHookButton: document.getElementById('notificationDisableHookButton'),
-  notificationPairButton: document.getElementById('notificationPairButton'),
-  notificationTestButton: document.getElementById('notificationTestButton'),
-  notificationQrPanel: document.getElementById('notificationQrPanel'),
-  notificationQrImage: document.getElementById('notificationQrImage'),
-  notificationPairingExpiry: document.getElementById('notificationPairingExpiry'),
-  notificationInstallationList: document.getElementById('notificationInstallationList'),
   notificationActionStatus: document.getElementById('notificationActionStatus'),
   notificationWeChatPairingFields: document.getElementById('notificationWeChatPairingFields'),
   notificationWeChatConfiguredFields: document.getElementById('notificationWeChatConfiguredFields'),
@@ -736,8 +723,7 @@ function settingsSectionSummary(section) {
   }
   if (section === 'notifications') {
     if (state.notificationStatus?.wechat?.configured) return t('settings.notifications.wechat.summary');
-    if (!state.notificationStatus?.configured) return t('settings.notifications.notConfigured');
-    return t('settings.notifications.summary', { count: state.notificationStatus.mobileInstallations?.length || 0 });
+    return t('settings.notifications.notConfigured');
   }
   if (section === 'tools') {
     const counts = clientHealthPresentationApi.clientHealthCountsForTracked(
@@ -8370,16 +8356,10 @@ function setNotificationActionStatus(text, error = false) {
 
 function renderNotificationSettings() {
   const status = state.notificationStatus;
-  const configured = status?.configured === true;
   const wechat = status?.wechat || {};
   const wechatConfigured = wechat.configured === true;
-  els.notificationEnrollmentFields?.classList.toggle('hidden', configured);
-  els.notificationConfiguredFields?.classList.toggle('hidden', !configured);
   els.notificationWeChatPairingFields?.classList.toggle('hidden', wechatConfigured);
   els.notificationWeChatConfiguredFields?.classList.toggle('hidden', !wechatConfigured);
-  if (els.notificationCloudUrlInput && !els.notificationCloudUrlInput.value) {
-    els.notificationCloudUrlInput.value = status?.baseUrl || '';
-  }
   if (els.notificationWeChatApiUrlInput && !els.notificationWeChatApiUrlInput.value) {
     els.notificationWeChatApiUrlInput.value = wechat.baseUrl || '';
   }
@@ -8389,14 +8369,7 @@ function renderNotificationSettings() {
   if (els.notificationsSettingsSummary) {
     els.notificationsSettingsSummary.textContent = wechatConfigured
       ? t('settings.notifications.wechat.summary')
-      : configured
-        ? t('settings.notifications.summary', { count: status.mobileInstallations?.length || 0 })
-        : t('settings.notifications.notConfigured');
-  }
-  if (configured && els.notificationDeviceStatus) {
-    els.notificationDeviceStatus.textContent = t('settings.notifications.connectedAs', {
-      name: status.device?.name || status.device?.deviceId || '—'
-    });
+      : t('settings.notifications.notConfigured');
   }
   if (wechatConfigured && els.notificationWeChatStatus) {
     els.notificationWeChatStatus.textContent = t('settings.notifications.wechat.connectedAs', {
@@ -8416,62 +8389,8 @@ function renderNotificationSettings() {
   }
   els.notificationEnableHookButton?.classList.toggle('hidden', hookEnabled);
   els.notificationDisableHookButton?.classList.toggle('hidden', !hookEnabled);
-  if (els.notificationEnableHookButton) els.notificationEnableHookButton.disabled = !configured && !wechatConfigured;
+  if (els.notificationEnableHookButton) els.notificationEnableHookButton.disabled = !wechatConfigured;
   els.notificationTrustNote?.classList.toggle('hidden', !hookEnabled || status.hook?.needsTrust !== true);
-  if (els.notificationTestButton) els.notificationTestButton.disabled = !configured || !(status.mobileInstallations?.length > 0);
-  if (configured && els.notificationInstallationList) {
-    els.notificationInstallationList.replaceChildren();
-    const installations = status.mobileInstallations || [];
-    if (installations.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'settings-note';
-      empty.textContent = t('settings.notifications.noDevices');
-      els.notificationInstallationList.append(empty);
-    }
-    for (const installation of installations) {
-      const row = document.createElement('div');
-      row.className = 'notification-installation-row';
-      const detail = document.createElement('div');
-      const name = document.createElement('div');
-      name.textContent = installation.name || installation.installationId;
-      const meta = document.createElement('div');
-      meta.className = 'notification-installation-meta';
-      meta.textContent = installation.pushEnabled
-        ? t('settings.notifications.pushEnabled')
-        : t('settings.notifications.pushDisabled');
-      detail.append(name, meta);
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = t('settings.notifications.unpair');
-      remove.addEventListener('click', async () => {
-        remove.disabled = true;
-        try {
-          state.notificationStatus = await window.tokenMNotifications.unpair(installation.installationId);
-          state.notificationPairing = null;
-          renderNotificationSettings();
-          setNotificationActionStatus(t('settings.notifications.unpaired'));
-        } catch (error) {
-          setNotificationActionStatus(notificationErrorText(error), true);
-          remove.disabled = false;
-        }
-      });
-      row.append(detail, remove);
-      els.notificationInstallationList.append(row);
-    }
-  }
-}
-
-function showNotificationPairing(pairing) {
-  if (!pairing?.pairingUrl || typeof window.qrcode !== 'function') throw new Error('qr_unavailable');
-  const qr = window.qrcode(0, 'M');
-  qr.addData(pairing.pairingUrl, 'Byte');
-  qr.make();
-  els.notificationQrImage.src = qr.createDataURL(5, 8);
-  els.notificationQrPanel.classList.remove('hidden');
-  const expires = new Date(pairing.expiresAt);
-  els.notificationPairingExpiry.textContent = t('settings.notifications.expiresAt', {
-    time: Number.isFinite(expires.getTime()) ? expires.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'
-  });
 }
 
 function syncSettingsForm() {
@@ -11130,23 +11049,6 @@ els.saveSettingsButton.addEventListener('click', async () => {
   await refreshStats();
 });
 
-els.notificationEnrollButton?.addEventListener('click', async () => {
-  const baseUrl = els.notificationCloudUrlInput.value.trim();
-  const code = els.notificationEnrollmentCodeInput.value;
-  els.notificationEnrollButton.disabled = true;
-  setNotificationActionStatus(t('settings.notifications.enrolling'));
-  try {
-    state.notificationStatus = await window.tokenMNotifications.enroll({ baseUrl, code });
-    els.notificationEnrollmentCodeInput.value = '';
-    renderNotificationSettings();
-    setNotificationActionStatus(t('settings.notifications.enrolled'));
-  } catch (error) {
-    setNotificationActionStatus(notificationErrorText(error), true);
-  } finally {
-    els.notificationEnrollButton.disabled = false;
-  }
-});
-
 els.notificationWeChatPairButton?.addEventListener('click', async () => {
   const code = els.notificationWeChatCodeInput.value.trim();
   if (!/^\d{6}$/.test(code)) {
@@ -11227,31 +11129,6 @@ els.notificationDisableHookButton?.addEventListener('click', async () => {
     renderNotificationSettings();
   } catch (error) {
     setNotificationActionStatus(notificationErrorText(error), true);
-  }
-});
-
-els.notificationPairButton?.addEventListener('click', async () => {
-  els.notificationPairButton.disabled = true;
-  try {
-    state.notificationPairing = await window.tokenMNotifications.createPairing();
-    showNotificationPairing(state.notificationPairing);
-    setNotificationActionStatus(t('settings.notifications.scanQr'));
-  } catch (error) {
-    setNotificationActionStatus(notificationErrorText(error), true);
-  } finally {
-    els.notificationPairButton.disabled = false;
-  }
-});
-
-els.notificationTestButton?.addEventListener('click', async () => {
-  els.notificationTestButton.disabled = true;
-  try {
-    await window.tokenMNotifications.sendTest();
-    setNotificationActionStatus(t('settings.notifications.testSent'));
-  } catch (error) {
-    setNotificationActionStatus(notificationErrorText(error), true);
-  } finally {
-    els.notificationTestButton.disabled = !(state.notificationStatus?.mobileInstallations?.length > 0);
   }
 });
 
