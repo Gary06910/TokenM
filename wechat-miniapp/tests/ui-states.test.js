@@ -84,7 +84,10 @@ test('mini-program full DTO keeps only documented display fields', () => {
 
 test('mini-program quota presentation follows frozen thresholds', () => {
   assert.deepEqual(presentation.quotaView({ available: 0 }), {
-    available: 0, status: 'empty', label: '已耗尽', notice: '任务仍会保存，但不会发送微信提醒', tone: 'danger',
+    available: 0, reserved: 0, status: 'empty', label: '已耗尽', notice: '任务仍会保存，但不会发送微信提醒', tone: 'danger',
+  });
+  assert.deepEqual(presentation.quotaView({ available: 0, reserved: 3 }), {
+    available: 0, reserved: 3, status: 'empty', label: '当前无可用额度', notice: '3 次额度正在等待发送结果确认', tone: 'danger',
   });
   assert.equal(presentation.quotaView({ available: 2 }).status, 'low');
   assert.equal(presentation.quotaView({ available: 8 }).status, 'normal');

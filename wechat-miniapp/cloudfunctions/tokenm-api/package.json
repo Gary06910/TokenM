@@ -12,6 +12,6 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "wx-server-sdk": "4.0.2"
+    "wx-server-sdk": "file:vendor/wx-server-sdk-4.0.2-tokenm-diagnostic-v2.tgz"
   }
 }

@@ -72,7 +72,7 @@ Page({
           try {
             await api.recordSubscriptionOutcome(intent.id, 'accept');
             const available = this.data.quota.available + 1;
-            this.setData({ quota: quotaView({ available }), requesting: false, grantIntent: null, message: '已补充 1 次通知', messageTone: 'success' });
+            this.setData({ quota: quotaView({ available, reserved: this.data.quota.reserved }), requesting: false, grantIntent: null, message: '已补充 1 次通知', messageTone: 'success' });
             this.prepareGrant();
           } catch (_) {
             this.setData({ requesting: false, grantIntent: null, message: '微信授权已完成，但额度同步失败。请刷新页面；不要重复点击。', messageTone: 'danger', blocked: true });

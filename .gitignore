@@ -23,6 +23,26 @@ worker/.wrangler/
 worker/node_modules/
 worker/.dev.vars
 devlog/
+coverage/
+.cache/
+
+# Local CloudBase forensic, verification, recovery, and deployment artifacts.
+/.forensic-*/
+/.forensic-*.zip
+/.verification-*/
+/.verification-*.zip
+/.diagnostic-*/
+/.diagnostic-*.zip
+/.production-artifact-*/
+/.production-artifact-*.zip
+/.production-tokenm-api-*/
+/.production-tokenm-api-*.zip
+/.deployment-staging-*/
+/wechat-miniapp/.recovery-build-*/
+/wechat-miniapp/.deployment-staging-*/
+
+# Incident-specific production recovery source contains real delivery allowlists.
+/wechat-miniapp/cloudfunctions/tokenm-maintenance/
 
 # WeChat DevTools machine-local configuration (copy from the tracked example).
 wechat-miniapp/project.private.config.json

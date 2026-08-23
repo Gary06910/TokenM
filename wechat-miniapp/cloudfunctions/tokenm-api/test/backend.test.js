@@ -6,9 +6,10 @@ const test = require('node:test');
 
 const { createApplication } = require('../lib/app');
 const { loadConfig } = require('../lib/config');
+const { createLogger } = require('../lib/logger');
 const { createMemoryRepository } = require('../lib/repository');
 const { hmacHex } = require('../lib/security');
-const { buildTemplateData, createWechatSender } = require('../lib/sender');
+const { buildTemplateData, classifyProviderError, createWechatSender } = require('../lib/sender');
 const { createService, COLLECTIONS, validateState } = require('../lib/service');
 
 const REQUEST_ID = 'req_abcdefghijklmnop';
@@ -66,10 +67,29 @@ function harness(options = {}) {
     config: cfg,
     clock: () => new Date(current.value),
     randomInt: () => nextCode++,
-    randomBytes: crypto.randomBytes
+    randomBytes: crypto.randomBytes,
+    logger: options.logger
   });
   const app = createApplication({ service, randomBytes: crypto.randomBytes });
   return { repo, current, sends, sender, config: cfg, service, app };
+}
+
+function diagnosticCapture() {
+  const entries = [];
+  const output = {};
+  for (const level of ['info', 'warn', 'error', 'log']) {
+    output[level] = (line) => entries.push({ level, payload: JSON.parse(line) });
+  }
+  return { entries, logger: createLogger(output) };
+}
+
+async function runProviderDiagnostic(send) {
+  const capture = diagnosticCapture();
+  const h = harness({ send, logger: capture.logger });
+  const paired = await pair(h);
+  await grantOne(h);
+  const result = await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  return { capture, h, result };
 }
 
 async function bootstrap(h, identity = USER_A) {
@@ -299,6 +319,281 @@ test('QUOTA-04 explicit provider rejection releases the reservation', async () =
   assert.equal(result.notificationStatus, 'failed');
   const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
   assert.deepEqual({ available: state.available, reserved: state.reserved, consumed: state.consumedTotal, released: state.releasedTotal }, { available: 1, reserved: 0, consumed: 0, released: 1 });
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual({ status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode }, { status: 'failed', providerErrcode: 43101, providerErrmsgCode: 'wechat_43101' });
+  validateState(state);
+});
+
+test('QUOTA-04B thrown explicit WeChat provider rejection preserves code and releases reservation', async () => {
+  const h = harness({ send: async () => {
+    const error = new Error('user refuse to accept the msg');
+    error.errCode = 43101;
+    error.errMsg = 'openapi subscribeMessage.send:fail';
+    throw error;
+  } });
+  const paired = await pair(h);
+  await grantOne(h);
+  const result = await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  assert.equal(result.notificationStatus, 'failed');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual({ status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode }, { status: 'failed', providerErrcode: 43101, providerErrmsgCode: 'wechat_43101' });
+  const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.deepEqual({ available: state.available, reserved: state.reserved, consumed: state.consumedTotal, released: state.releasedTotal }, { available: 1, reserved: 0, consumed: 0, released: 1 });
+  validateState(state);
+});
+
+test('PROVIDER-01 generic thrown errors remain uncertain', () => {
+  assert.deepEqual(classifyProviderError(new Error('synthetic timeout')), { status: 'unknown', errcode: null, errmsgCode: 'provider_call_uncertain' });
+  const error = new Error('system failure');
+  error.code = 'ETIMEDOUT';
+  assert.deepEqual(classifyProviderError(error), { status: 'unknown', errcode: null, errmsgCode: 'provider_call_uncertain' });
+});
+
+test('DIAG-01 generic timeout remains unknown and emits one sanitized diagnostic', async () => {
+  const { capture, h, result } = await runProviderDiagnostic(async () => {
+    throw new Error('synthetic timeout');
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual(
+    { status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'unknown', providerErrcode: null, providerErrmsgCode: 'provider_call_uncertain' }
+  );
+  assert.equal(capture.entries.length, 1);
+  assert.equal(capture.entries[0].payload.event, 'wechat_provider_throw_unclassified');
+  const serialized = JSON.stringify(capture.entries);
+  assert.equal(serialized.includes('synthetic timeout'), false);
+  assert.equal(serialized.includes('stack'), false);
+});
+
+test('DIAG-02 numeric top-level code remains unknown but emits a numeric hint', async () => {
+  const { capture, result } = await runProviderDiagnostic(async () => {
+    const error = new Error('synthetic');
+    error.code = 43101;
+    throw error;
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  assert.deepEqual(capture.entries[0].payload.providerErrorShape['top.code'], {
+    present: true,
+    type: 'number',
+    safeInteger: true,
+    numericValue: 43101
+  });
+});
+
+test('DIAG-03 nested provider-looking code remains unknown but emits its path', async () => {
+  const { capture, result } = await runProviderDiagnostic(async () => {
+    throw { originalError: { errCode: 43101 } };
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  assert.deepEqual(capture.entries[0].payload.providerErrorShape['originalError.errCode'], {
+    present: true,
+    type: 'number',
+    safeInteger: true,
+    numericValue: 43101
+  });
+});
+
+test('DIAG-04 explicit top-level errCode remains failed and emits no unclassified diagnostic', async () => {
+  const { capture, h, result } = await runProviderDiagnostic(async () => {
+    throw { errCode: 43101, errMsg: 'provider rejected' };
+  });
+  assert.equal(result.notificationStatus, 'failed');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual(
+    { status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'failed', providerErrcode: 43101, providerErrmsgCode: 'wechat_43101' }
+  );
+  assert.equal(capture.entries.length, 0);
+});
+
+test('DIAG-05 success emits no unclassified diagnostic', async () => {
+  const { capture, result } = await runProviderDiagnostic(async () => ({ errcode: 0, errmsg: 'ok' }));
+  assert.equal(result.notificationStatus, 'sent');
+  assert.equal(capture.entries.length, 0);
+});
+
+test('DIAG-06 diagnostic omits messages, stack, identity-like fields, and credentials', async () => {
+  const secrets = {
+    message: 'private-message-sentinel',
+    errMsg: 'private-errmsg-sentinel',
+    stack: 'private-stack-sentinel',
+    openid: 'openid-private-sentinel',
+    credential: 'credential-private-sentinel'
+  };
+  const { capture, result } = await runProviderDiagnostic(async () => {
+    const error = new Error(secrets.message);
+    error.errMsg = secrets.errMsg;
+    error.stack = secrets.stack;
+    error.openid = secrets.openid;
+    error.credential = secrets.credential;
+    throw error;
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  const serialized = JSON.stringify(capture.entries);
+  for (const secret of Object.values(secrets)) assert.equal(serialized.includes(secret), false);
+  assert.equal(serialized.includes('"message"'), false);
+  assert.equal(serialized.includes('"stack"'), false);
+  assert.equal(serialized.includes('"openid"'), false);
+  assert.equal(serialized.includes('"credential"'), false);
+  assert.equal(capture.entries[0].payload.providerErrorShape['top.errMsg'].present, true);
+  assert.equal(capture.entries[0].payload.providerErrorShape['top.errMsg'].type, 'string');
+});
+
+test('SDK-01 thrown CloudBase SYS_ERR -501001 remains uncertain', () => {
+  assert.deepEqual(classifyProviderError({ errCode: -501001, errMsg: 'redacted' }), {
+    status: 'unknown',
+    errcode: null,
+    errmsgCode: 'provider_call_uncertain',
+    classificationBranch: 'sdk_outer_uncertain',
+    outerCode: -501001
+  });
+});
+
+test('SDK-02 thrown CloudBase timeout -501002 remains uncertain', () => {
+  assert.deepEqual(classifyProviderError({ errCode: -501002, errMsg: 'redacted' }), {
+    status: 'unknown',
+    errcode: null,
+    errmsgCode: 'provider_call_uncertain',
+    classificationBranch: 'sdk_outer_uncertain',
+    outerCode: -501002
+  });
+});
+
+test('SDK-03 thrown cloud-call timeout -604102 remains uncertain', () => {
+  assert.deepEqual(classifyProviderError({ errCode: -604102, errMsg: 'redacted' }), {
+    status: 'unknown',
+    errcode: null,
+    errmsgCode: 'provider_call_uncertain',
+    classificationBranch: 'sdk_outer_uncertain',
+    outerCode: -604102
+  });
+});
+
+test('SDK-04 thrown positive WeChat business code 43101 remains definite failed', () => {
+  assert.deepEqual(classifyProviderError({ errCode: 43101, errMsg: 'redacted' }), {
+    status: 'failed',
+    errcode: 43101,
+    errmsgCode: 'wechat_43101'
+  });
+});
+
+test('SDK-05 returned errcode 0 remains sent', async () => {
+  const { capture, h, result } = await runProviderDiagnostic(async () => ({ errcode: 0, errmsg: 'ok' }));
+  assert.equal(result.notificationStatus, 'sent');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual(
+    { status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'sent', providerErrcode: 0, providerErrmsgCode: null }
+  );
+  assert.equal(capture.entries.length, 0);
+});
+
+test('SDK-06 returned errcode 43101 remains definite failed', async () => {
+  const { capture, h, result } = await runProviderDiagnostic(async () => ({ errcode: 43101, errmsg: 'redacted' }));
+  assert.equal(result.notificationStatus, 'failed');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual(
+    { status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'failed', providerErrcode: 43101, providerErrmsgCode: 'wechat_43101' }
+  );
+  assert.equal(capture.entries.length, 0);
+});
+
+test('SDK-07 generic thrown timeout remains unknown on the unclassified branch', async () => {
+  const { capture, h, result } = await runProviderDiagnostic(async () => {
+    throw new Error('private-timeout-sentinel');
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.equal(delivery.providerErrcode, null);
+  assert.equal(capture.entries[0].payload.classificationBranch, 'throw_unclassified');
+  assert.equal(JSON.stringify(capture.entries).includes('private-timeout-sentinel'), false);
+});
+
+test('SDK-08 negative SDK error emits origin and numeric shape without private values', async () => {
+  const secrets = ['private-message', 'private-errmsg', 'private-stack', 'private-openid', 'private-credential'];
+  const { capture, h, result } = await runProviderDiagnostic(async () => {
+    const error = new Error(secrets[0]);
+    error.errCode = -501001;
+    error.errMsg = secrets[1];
+    error.stack = secrets[2];
+    error.openid = secrets[3];
+    error.credential = secrets[4];
+    throw error;
+  });
+  assert.equal(result.notificationStatus, 'unknown');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.deepEqual(
+    { status: delivery.status, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'unknown', providerErrcode: null, providerErrmsgCode: 'provider_call_uncertain' }
+  );
+  assert.equal(capture.entries.length, 1);
+  const payload = capture.entries[0].payload;
+  assert.equal(payload.event, 'wechat_provider_throw_unclassified');
+  assert.equal(payload.classificationBranch, 'sdk_outer_uncertain');
+  assert.equal(payload.outerCode, -501001);
+  assert.deepEqual(payload.providerErrorShape['top.errCode'], {
+    present: true,
+    type: 'number',
+    safeInteger: true,
+    numericValue: -501001
+  });
+  const serialized = JSON.stringify(capture.entries);
+  for (const secret of secrets) assert.equal(serialized.includes(secret), false);
+  const loggerBoundary = diagnosticCapture();
+  loggerBoundary.logger.warn({ event: 'synthetic', outerCode: 'private-outer-code-string' });
+  assert.equal(JSON.stringify(loggerBoundary.entries).includes('private-outer-code-string'), false);
+});
+
+test('SDK-09 negative SDK uncertainty holds reservation without release', async () => {
+  const h = harness({ send: async () => { throw { errCode: -501001, errMsg: 'redacted' }; } });
+  const paired = await pair(h);
+  await grantOne(h);
+  const seeded = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  Object.assign(seeded, {
+    available: 5,
+    reserved: 0,
+    grantedTotal: 11,
+    consumedTotal: 6,
+    releasedTotal: 6,
+    version: 36
+  });
+  validateState(seeded);
+  await h.repo.set(COLLECTIONS.states, seeded._id, seeded);
+
+  const result = await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  assert.equal(result.notificationStatus, 'unknown');
+  const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.deepEqual(
+    {
+      available: state.available,
+      reserved: state.reserved,
+      consumedTotal: state.consumedTotal,
+      releasedTotal: state.releasedTotal,
+      grantedTotal: state.grantedTotal,
+      version: state.version
+    },
+    { available: 4, reserved: 1, consumedTotal: 6, releasedTotal: 6, grantedTotal: 11, version: 37 }
+  );
+  validateState(state);
+});
+
+test('SDK-10 duplicate negative SDK event remains one task delivery and attempt', async () => {
+  const h = harness({ send: async () => { throw { errCode: -501001, errMsg: 'redacted' }; } });
+  const paired = await pair(h);
+  await grantOne(h);
+  const payload = eventFor(paired.desktop.desktopId);
+  const first = await h.service.createEvent(paired.credential, payload, REQUEST_ID);
+  const duplicate = await h.service.createEvent(paired.credential, payload, REQUEST_ID);
+  assert.equal(first.notificationStatus, 'unknown');
+  assert.equal(duplicate.status, 'duplicate');
+  assert.equal(duplicate.notificationStatus, 'unknown');
+  assert.equal((await h.repo.snapshot(COLLECTIONS.tasks)).length, 1);
+  const deliveries = await h.repo.snapshot(COLLECTIONS.deliveries);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].attemptCount, 1);
+  assert.equal(h.sends.length, 1);
 });
 
 test('QUOTA-05 uncertain provider outcome retains reservation until explicit reconciliation', async () => {
@@ -311,9 +606,88 @@ test('QUOTA-05 uncertain provider outcome retains reservation until explicit rec
   assert.deepEqual({ available: state.available, reserved: state.reserved, consumed: state.consumedTotal }, { available: 0, reserved: 1, consumed: 0 });
   const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
   assert.equal(delivery.attemptCount, 1);
+  assert.equal(delivery.providerErrcode, null);
+  assert.equal(delivery.providerErrmsgCode, 'provider_call_uncertain');
   await h.service.reconcileUnknown(delivery._id, 'failed');
+  assert.equal((await h.service.reconcileUnknown(delivery._id, 'failed')).changed, false);
   state = (await h.repo.snapshot(COLLECTIONS.states))[0];
   assert.deepEqual({ available: state.available, reserved: state.reserved }, { available: 1, reserved: 0 });
+  validateState(state);
+});
+
+test('QR-01 normal sent settlement retains quotaReserved provenance while consuming the live reservation', async () => {
+  const h = harness();
+  const paired = await pair(h);
+  await grantOne(h);
+  const result = await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  assert.equal(result.notificationStatus, 'sent');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.equal(delivery.status, 'sent');
+  assert.equal(delivery.quotaReserved, true);
+  assert.deepEqual(
+    { available: state.available, reserved: state.reserved, consumedTotal: state.consumedTotal, releasedTotal: state.releasedTotal },
+    { available: 0, reserved: 0, consumedTotal: 1, releasedTotal: 0 }
+  );
+  validateState(state);
+});
+
+test('QR-02 normal failed settlement retains quotaReserved provenance while releasing the live reservation', async () => {
+  const h = harness({ send: async () => ({ errcode: 43101, errmsg: 'synthetic rejection' }) });
+  const paired = await pair(h);
+  await grantOne(h);
+  const result = await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  assert.equal(result.notificationStatus, 'failed');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.equal(delivery.status, 'failed');
+  assert.equal(delivery.quotaReserved, true);
+  assert.deepEqual(
+    { available: state.available, reserved: state.reserved, consumedTotal: state.consumedTotal, releasedTotal: state.releasedTotal },
+    { available: 1, reserved: 0, consumedTotal: 0, releasedTotal: 1 }
+  );
+  validateState(state);
+});
+
+test('QR-03 unknown-to-failed reconciliation retains quotaReserved provenance and releases the live reservation', async () => {
+  const h = harness({ send: async () => { throw new Error('synthetic timeout'); } });
+  const paired = await pair(h);
+  await grantOne(h);
+  await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  const before = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  const result = await h.service.reconcileUnknown(before._id, 'failed');
+  const delivery = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  const task = (await h.repo.snapshot(COLLECTIONS.tasks))[0];
+  const state = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.equal(result.changed, true);
+  assert.deepEqual(
+    { status: delivery.status, quotaReserved: delivery.quotaReserved, providerErrcode: delivery.providerErrcode, providerErrmsgCode: delivery.providerErrmsgCode },
+    { status: 'failed', quotaReserved: true, providerErrcode: null, providerErrmsgCode: 'reconciled' }
+  );
+  assert.equal(task.notificationStatus, 'failed');
+  assert.deepEqual(
+    { available: state.available, reserved: state.reserved, consumedTotal: state.consumedTotal, releasedTotal: state.releasedTotal },
+    { available: 1, reserved: 0, consumedTotal: 0, releasedTotal: 1 }
+  );
+  validateState(state);
+});
+
+test('QR-04 repeated reconciliation is idempotent by terminal status while quotaReserved provenance remains true', async () => {
+  const h = harness({ send: async () => { throw new Error('synthetic timeout'); } });
+  const paired = await pair(h);
+  await grantOne(h);
+  await h.service.createEvent(paired.credential, eventFor(paired.desktop.desktopId), REQUEST_ID);
+  const unknown = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  assert.equal((await h.service.reconcileUnknown(unknown._id, 'failed')).changed, true);
+  const stateAfterFirst = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  const result = await h.service.reconcileUnknown(unknown._id, 'failed');
+  const deliveryAfterSecond = (await h.repo.snapshot(COLLECTIONS.deliveries))[0];
+  const stateAfterSecond = (await h.repo.snapshot(COLLECTIONS.states))[0];
+  assert.equal(result.changed, false);
+  assert.equal(deliveryAfterSecond.status, 'failed');
+  assert.equal(deliveryAfterSecond.quotaReserved, true);
+  assert.deepEqual(stateAfterSecond, stateAfterFirst);
+  validateState(stateAfterSecond);
 });
 
 test('PRIVACY-01 server rejects forbidden or non-null privacy content without storing it', async () => {

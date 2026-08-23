@@ -6,6 +6,7 @@
     <view class="quota-main">
       <view><text class="quota-number">{{quota.available}}</text><text class="quota-unit"> 次</text></view>
       <view class="status status-{{quota.tone}}"><text class="status-dot"></text><text>{{quota.label}} · {{quota.notice}}</text></view>
+      <view wx:if="{{quota.reserved > 0}}" class="quota-pending">待确认：{{quota.reserved}} 次（额度暂时保留）</view>
     </view>
     <view class="notice section">每发送一次 Codex 完成微信提醒，将消耗 1 次通知额度。任务记录不依赖通知额度。</view>
     <view wx:if="{{message}}" class="notice notice-{{messageTone}} section">{{message}}</view>

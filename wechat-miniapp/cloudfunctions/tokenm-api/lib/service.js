@@ -26,7 +26,7 @@ const {
   timingSafeHexEqual,
   truncateId
 } = require('./security');
-const { classifyProviderResult } = require('./sender');
+const { classifyProviderError, classifyProviderResult, describeProviderError } = require('./sender');
 
 const COLLECTIONS = {
   users: 'users',
@@ -647,18 +647,18 @@ function createService(dependencies) {
     if (created.task.notificationStatus !== 'pending') return { status: 'created', taskId, notificationStatus: created.task.notificationStatus };
 
     const claimTime = now();
-    const claimed = await repo.transaction(async (tx) => {
+    const providerAttemptId = await repo.transaction(async (tx) => {
       const delivery = await tx.get(COLLECTIONS.deliveries, deliveryId);
-      if (!delivery || delivery.status !== 'claimed' || delivery.attemptCount !== 0) return false;
+      if (!delivery || delivery.status !== 'claimed' || delivery.attemptCount !== 0) return null;
       delivery.status = 'sending';
       delivery.attemptCount = 1;
       delivery.providerAttemptId = randomId('att_', randomBytes);
       delivery.sendingAt = claimTime;
       delivery.updatedAt = claimTime;
       await tx.set(COLLECTIONS.deliveries, delivery._id, delivery);
-      return true;
+      return delivery.providerAttemptId;
     });
-    if (!claimed) {
+    if (!providerAttemptId) {
       const task = await repo.get(COLLECTIONS.tasks, taskId);
       return { status: 'created', taskId, notificationStatus: task?.notificationStatus || 'unknown' };
     }
@@ -666,8 +666,23 @@ function createService(dependencies) {
     let provider;
     try {
       provider = classifyProviderResult(await sender.send({ openid: created.openid, task: created.task, desktop: created.desktop }));
-    } catch {
-      provider = { status: 'unknown', errcode: null, errmsgCode: 'provider_call_uncertain' };
+    } catch (error) {
+      provider = classifyProviderError(error);
+      if (provider.status === 'unknown') {
+        const diagnostic = describeProviderError(error);
+        logger.warn({
+          event: 'wechat_provider_throw_unclassified',
+          code: provider.errmsgCode,
+          classificationBranch: provider.classificationBranch || 'throw_unclassified',
+          outerCode: provider.outerCode,
+          requestId,
+          subjectId: truncateId(deliveryId),
+          providerAttemptId,
+          errorNameSafe: diagnostic.errorNameSafe,
+          providerErrorShape: diagnostic.fields,
+          upstreamEvidence: diagnostic.upstreamEvidence
+        });
+      }
     }
     const finishTime = now();
     if (provider.status === 'unknown') {
@@ -767,11 +782,12 @@ function createService(dependencies) {
     if (!['sent', 'failed'].includes(outcome)) throw new AppError('invalid_request');
     const delivery = await repo.get(COLLECTIONS.deliveries, deliveryId);
     if (!delivery || delivery.status !== 'unknown') return { changed: false };
-    await repo.transaction(async (tx) => {
+    const changed = await repo.transaction(async (tx) => {
       const current = await tx.get(COLLECTIONS.deliveries, deliveryId);
       const task = current && await tx.get(COLLECTIONS.tasks, current.taskId);
       const state = current && await tx.get(COLLECTIONS.states, current.ownerId);
-      if (!current || current.status !== 'unknown' || !task || !state) return;
+      if (!current || current.status !== 'unknown' || current.providerErrmsgCode !== 'provider_call_uncertain' || !task || !state) return false;
+      if (task.ownerId !== current.ownerId || state._id !== current.ownerId || current.quotaReserved !== true) throw new Error('reconciliation ownership mismatch');
       validateState(state);
       if (state.reserved < 1) throw new Error('missing quota reservation');
       state.reserved -= 1;
@@ -794,8 +810,9 @@ function createService(dependencies) {
       await tx.set(COLLECTIONS.states, state._id, state);
       await tx.set(COLLECTIONS.deliveries, current._id, current);
       await tx.set(COLLECTIONS.tasks, task._id, task);
+      return true;
     });
-    return { changed: true };
+    return { changed };
   }
 
   return {

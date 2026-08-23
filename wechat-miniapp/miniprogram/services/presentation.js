@@ -48,13 +48,17 @@ function formatRelativeTime(value, now = Date.now()) {
 
 function quotaView(quota) {
   const available = Number.isSafeInteger(quota && quota.available) && quota.available >= 0 ? quota.available : 0;
+  const reserved = Number.isSafeInteger(quota && quota.reserved) && quota.reserved >= 0 ? quota.reserved : 0;
   if (available === 0) {
-    return { available, status: 'empty', label: '已耗尽', notice: '任务仍会保存，但不会发送微信提醒', tone: 'danger' };
+    return {
+      available, reserved, status: 'empty', label: reserved > 0 ? '当前无可用额度' : '已耗尽',
+      notice: reserved > 0 ? `${reserved} 次额度正在等待发送结果确认` : '任务仍会保存，但不会发送微信提醒', tone: 'danger'
+    };
   }
   if (available <= 3) {
-    return { available, status: 'low', label: '即将用完', notice: '额度即将用完', tone: 'warning' };
+    return { available, reserved, status: 'low', label: '即将用完', notice: reserved > 0 ? `${reserved} 次发送结果待确认` : '额度即将用完', tone: 'warning' };
   }
-  return { available, status: 'normal', label: '正常', notice: '通知额度充足', tone: 'info' };
+  return { available, reserved, status: 'normal', label: '正常', notice: reserved > 0 ? `${reserved} 次发送结果待确认` : '通知额度充足', tone: 'info' };
 }
 
 function normalizeDesktop(raw) {

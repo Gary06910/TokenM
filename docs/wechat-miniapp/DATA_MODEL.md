@@ -202,6 +202,8 @@ Cleanup：终态保留 30 天用于额度争议/安全审计，随后删除；pr
 
 `attemptCount <= 1` 是 v1 at-most-once invariant。`claimed -> sending` 在 transaction 中完成后才调用 provider；`sending -> sent|failed|unknown`。Duplicate event 只读此文档。
 
+`quotaReserved` 是冻结 v1 的不可变 provenance marker：`true` 表示该 delivery 创建时曾通过 `notificationState` 账本建立 quota reservation，不表示 reservation 当前仍 active。正常 `sent`、正常 `failed` 与 reconciliation 后的 `failed` 均保留 `quotaReserved: true`。实时 reservation 的唯一账本权威是 `notificationState.reserved`；settlement 必须由 delivery/task 终态、对应账本 delta 与账本恒等式共同证明，不能用 `quotaReserved: false` 证明。
+
 Indexes：`ownerId + createdAt desc`；`status + updatedAt`（reconciliation）；`taskId`。
 
 Retention：90 天；task 清除时一并删除。`unknown` 不因 TTL 自动释放 quota，须通过明确 reconciliation policy。
