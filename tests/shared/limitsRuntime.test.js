@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
-const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 function deferred() {
   let resolve;
@@ -454,6 +454,28 @@ test('a transient failure retains matching lastGood windows with the latest stat
   await runtime.refresh({ provider: 'kimi' }, 'interval');
   const row = runtime.getSnapshot().providers[0];
   assert.equal(row.status, 'unavailable');
+  assert.equal(row.updatedAt, '2026-07-21T00:00:00.000Z');
+  assert.equal(row.windows.length, 1);
+  runtime.stop();
+});
+
+test('a Codex source-rate-limited response retains the last known quota windows', async () => {
+  const results = [
+    [providerRow('codex', 'account', 'Plus', { updatedAt: '2026-07-21T00:00:00.000Z' })],
+    [providerRow('codex', 'account', 'Plus', {
+      status: 'sourceRateLimited',
+      updatedAt: '2026-07-21T00:05:00.000Z',
+      windows: []
+    })]
+  ];
+  const runtime = createLimitsRuntime({ limitProviders: ['codex'] }, runtimeDeps({
+    probeProvider: async () => results.shift()
+  }));
+
+  await runtime.refresh({ provider: 'codex' }, 'startup');
+  await runtime.refresh({ provider: 'codex' }, 'interval');
+  const row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'sourceRateLimited');
   assert.equal(row.updatedAt, '2026-07-21T00:00:00.000Z');
   assert.equal(row.windows.length, 1);
   runtime.stop();

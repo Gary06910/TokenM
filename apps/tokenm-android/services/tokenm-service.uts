@@ -1,0 +1,336 @@
+import { getRuntimeFacts } from './client-runtime.uts'
+import { sanitizeTask } from './presentation.uts'
+import {
+  dashboardSnapshot, desktopsSnapshot, settingsSnapshot, tasksSnapshot,
+  getPageCacheSession, isPageCacheSessionCurrent,
+  invalidateDesktopViews, invalidateSettingsViews
+} from './page-cache.uts'
+import type {
+  ClientRegistrationState,
+  ClientBootstrapStatus,
+  DashboardView,
+  DeliveryStatus,
+  DesktopRecord,
+  DesktopStatus,
+  NotificationSettings,
+  PairingSession,
+  PairingStatus,
+  PairingStatusRecord,
+  PrivacyConsentRecord,
+  TaskCursor,
+  TaskDeliveryFilter,
+  TaskFilter,
+  TaskPageResult,
+  TaskRecord
+} from '../types/models.uts'
+
+type CloudTask = {
+  taskId: string,
+  schemaVersion: number,
+  eventId: string,
+  event: string,
+  desktopId: string,
+  occurredAt: string,
+  privacyMode: boolean,
+  sessionId: string,
+  project: string | null,
+  model: string | null,
+  summary: string | null,
+  durationMs: number | null,
+  notificationStatus: DeliveryStatus,
+  createdAt: string | null
+}
+
+type CloudDesktop = {
+  desktopId: string,
+  name: string,
+  status: DesktopStatus,
+  createdAt: string | null,
+  lastSeenAt: string | null,
+  lastEventAt: string | null
+}
+
+type CloudSettings = {
+  notificationsEnabled: boolean
+}
+
+type CloudPrivacyConsent = {
+  requiredVersion: string,
+  acceptedVersion: string | null,
+  acceptedAt: string | null,
+  isCurrent: boolean
+}
+
+type CloudBootstrapUser = {
+  notificationsEnabled: boolean,
+  privacyConsent: CloudPrivacyConsent,
+  createdAt: string | null
+}
+
+type CloudBootstrapCounts = {
+  activeDesktops: number,
+  tasks: number,
+  activeMobileDevices: number
+}
+
+type CloudDashboardCounts = {
+  activeDesktops: number,
+  tasks: number,
+  activeMobileDevices: number,
+  todayTasks: number
+}
+
+type CloudDashboardResult = {
+  settings: CloudSettings,
+  counts: CloudDashboardCounts,
+  latestTask: CloudTask | null
+}
+
+type CloudBootstrapResult = {
+  ok: boolean,
+  user: CloudBootstrapUser,
+  counts: CloudBootstrapCounts
+}
+
+type CloudTaskPageResult = {
+  tasks: CloudTask[],
+  nextCursor: TaskCursor | null
+}
+
+type CloudTaskResult = { task: CloudTask }
+type CloudDesktopListResult = { desktops: CloudDesktop[] }
+type CloudDesktopResult = { desktop: CloudDesktop }
+type CloudSettingsResult = { settings: CloudSettings }
+
+type CloudPairingSessionResult = {
+  sessionId: string,
+  code: string,
+  expiresAt: string,
+  ttlSeconds: number
+}
+
+type CloudPairingStatusResult = {
+  sessionId: string | null,
+  status: PairingStatus,
+  expiresAt: string | null,
+  desktopId: string | null
+}
+
+const tokenmCo = uniCloud.importObject('tokenm-co', { customUI: true })
+
+const mapDesktop = (value: CloudDesktop): DesktopRecord => ({
+  desktopId: value.desktopId,
+  name: value.name,
+  status: value.status,
+  createdAt: value.createdAt,
+  lastSeenAt: value.lastSeenAt,
+  lastEventAt: value.lastEventAt
+})
+
+const mapPrivacyConsent = (value: CloudPrivacyConsent): PrivacyConsentRecord => ({
+  requiredVersion: value.requiredVersion,
+  acceptedVersion: value.acceptedVersion,
+  acceptedAt: value.acceptedAt,
+  isCurrent: value.isCurrent
+})
+
+export const getClientBootstrapStatus = async (): Promise<ClientBootstrapStatus> => {
+  const result = await tokenmCo.bootstrap<CloudBootstrapResult>({})
+  return {
+    backend: 'available',
+    activeDesktopCount: result.counts.activeDesktops,
+    notificationsEnabled: result.user.notificationsEnabled,
+    privacyConsent: mapPrivacyConsent(result.user.privacyConsent)
+  }
+}
+
+const desktopName = (desktopId: string, desktops: DesktopRecord[]): string => {
+  const found = desktops.find((item) => item.desktopId == desktopId)
+  return found == null ? '未知电脑' : found.name
+}
+
+const mapTask = (value: CloudTask, desktops: DesktopRecord[]): TaskRecord => sanitizeTask({
+  taskId: value.taskId,
+  desktopId: value.desktopId,
+  desktopName: desktopName(value.desktopId, desktops),
+  occurredAt: value.occurredAt,
+  privacyMode: value.privacyMode,
+  project: value.project,
+  model: value.model,
+  summary: value.summary,
+  durationMs: value.durationMs,
+  notificationStatus: value.notificationStatus
+})
+
+const notificationSettings = (enabled: boolean): NotificationSettings => {
+  const facts = getRuntimeFacts()
+  let clientRegistration: ClientRegistrationState = 'notStarted'
+  if (facts.mobileRegistration == 'ready') clientRegistration = 'ready'
+  if (facts.mobileRegistration == 'error') clientRegistration = 'error'
+  return {
+    notificationsEnabled: enabled,
+    permissionState: facts.notificationPermission,
+    clientRegistration
+  }
+}
+
+const localDayRange = (): UTSJSONObject => {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start.getTime())
+  end.setDate(end.getDate() + 1)
+  return { dayStart: start.toISOString(), dayEnd: end.toISOString() }
+}
+
+const notificationStatuses = (filter: TaskDeliveryFilter): DeliveryStatus[] | null => {
+  // The current Android cloud contract records completion as not_requested
+  // while Push delivery is intentionally deferred to the next phase.
+  if (filter == 'not_requested') return ['not_requested']
+  return null
+}
+
+export const listDesktops = (): Promise<DesktopRecord[]> => {
+  return desktopsSnapshot.read(false, async (): Promise<DesktopRecord[]> => {
+    const result = await tokenmCo.listDesktops<CloudDesktopListResult>({})
+    return result.desktops.map(mapDesktop)
+  })
+}
+
+const readDashboard = async (): Promise<DashboardView> => {
+  const range = localDayRange()
+  const session = getPageCacheSession()
+  const settingsRevision = settingsSnapshot.revision
+  let dashboard: CloudDashboardResult | null = null
+  let taskPage: CloudTaskPageResult | null = null
+  let desktops: DesktopRecord[] = []
+  // Each callback returns void: no heterogeneous UTS Promise.all result array.
+  await Promise.all<void>([
+    tokenmCo.getDashboard<CloudDashboardResult>(range).then((value: CloudDashboardResult): void => { dashboard = value }),
+    tokenmCo.listTasks<CloudTaskPageResult>({ limit: 5 }).then((value: CloudTaskPageResult): void => { taskPage = value }),
+    listDesktops().then((value: DesktopRecord[]): void => { desktops = value })
+  ])
+  const summary = dashboard!
+  const recent = taskPage!
+  settingsSnapshot.seed(summary.settings.notificationsEnabled, session, settingsRevision)
+  return {
+    todayCompletedCount: summary.counts.todayTasks,
+    activeDesktopCount: summary.counts.activeDesktops,
+    desktops: desktops.filter((item) => item.status == 'active').slice(0, 2),
+    recentTasks: recent.tasks.map((item) => mapTask(item, desktops)),
+    notifications: notificationSettings(summary.settings.notificationsEnabled)
+  }
+}
+
+export const getDashboard = (): Promise<DashboardView> => dashboardSnapshot.read(false, readDashboard)
+
+const readTasks = async (
+  cursor: TaskCursor | null,
+  filter: TaskFilter,
+  desktopId: string,
+  deliveryFilter: TaskDeliveryFilter,
+  limit: number
+): Promise<TaskPageResult> => {
+  const input: UTSJSONObject = { limit }
+  if (cursor != null) input.set('cursor', cursor)
+  if (filter == 'privacy') input.set('privacyMode', true)
+  if (filter == 'full') input.set('privacyMode', false)
+  if (desktopId != 'all') input.set('desktopId', desktopId)
+  const statuses = notificationStatuses(deliveryFilter)
+  if (statuses != null) input.set('notificationStatuses', statuses)
+
+  let taskPage: CloudTaskPageResult | null = null
+  let desktops: DesktopRecord[] = []
+  await Promise.all<void>([
+    tokenmCo.listTasks<CloudTaskPageResult>(input).then((value: CloudTaskPageResult): void => { taskPage = value }),
+    listDesktops().then((value: DesktopRecord[]): void => { desktops = value })
+  ])
+  const page = taskPage!
+  return {
+    items: page.tasks.map((item) => mapTask(item, desktops)),
+    nextCursor: page.nextCursor
+  }
+}
+
+export const listTasks = (
+  cursor: TaskCursor | null,
+  filter: TaskFilter,
+  desktopId: string,
+  deliveryFilter: TaskDeliveryFilter,
+  limit: number
+): Promise<TaskPageResult> => {
+  if (cursor == null && filter == 'all' && desktopId == 'all' && deliveryFilter == 'all' && limit == 20) {
+    return tasksSnapshot.read(false, (): Promise<TaskPageResult> => readTasks(cursor, filter, desktopId, deliveryFilter, limit))
+  }
+  return readTasks(cursor, filter, desktopId, deliveryFilter, limit)
+}
+
+export const getTask = async (taskId: string): Promise<TaskRecord> => {
+  const session = getPageCacheSession()
+  const taskResult = await tokenmCo.getTask<CloudTaskResult>({ taskId })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  const task = taskResult.task
+  const desktops = await listDesktops()
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  return mapTask(task, desktops)
+}
+
+export const renameDesktop = async (desktopId: string, name: string): Promise<DesktopRecord> => {
+  const session = getPageCacheSession()
+  const result = await tokenmCo.renameDesktop<CloudDesktopResult>({ desktopId, name: name.trim() })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  invalidateDesktopViews()
+  return mapDesktop(result.desktop)
+}
+
+export const unbindDesktop = async (desktopId: string): Promise<DesktopRecord> => {
+  const session = getPageCacheSession()
+  const result = await tokenmCo.unbindDesktop<CloudDesktopResult>({
+    desktopId,
+    confirmation: 'UNBIND'
+  })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  invalidateDesktopViews()
+  return mapDesktop(result.desktop)
+}
+
+export const createPairingCode = async (): Promise<PairingSession> => {
+  const result = await tokenmCo.createPairingCode<CloudPairingSessionResult>({})
+  return {
+    sessionId: result.sessionId,
+    code: result.code,
+    expiresAt: result.expiresAt,
+    status: 'active',
+    desktopId: null
+  }
+}
+
+export const getPairingStatus = async (sessionId: string): Promise<PairingStatusRecord> => {
+  const session = getPageCacheSession()
+  const result = await tokenmCo.getPairingStatus<CloudPairingStatusResult>({ sessionId })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  if (result.status == 'paired') invalidateDesktopViews()
+  return {
+    sessionId: result.sessionId,
+    status: result.status,
+    expiresAt: result.expiresAt,
+    desktopId: result.desktopId
+  }
+}
+
+export const getNotificationSettings = async (): Promise<NotificationSettings> => {
+  const enabled = await settingsSnapshot.read(false, async (): Promise<boolean> => {
+    const result = await tokenmCo.getDashboard<CloudDashboardResult>({})
+    return result.settings.notificationsEnabled
+  })
+  return notificationSettings(enabled)
+}
+
+export const updateNotificationsEnabled = async (enabled: boolean): Promise<NotificationSettings> => {
+  const session = getPageCacheSession()
+  invalidateSettingsViews()
+  const result = await tokenmCo.updateSettings<CloudSettingsResult>({ notificationsEnabled: enabled })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  invalidateSettingsViews()
+  settingsSnapshot.seed(result.settings.notificationsEnabled, session, settingsSnapshot.revision)
+  return notificationSettings(result.settings.notificationsEnabled)
+}

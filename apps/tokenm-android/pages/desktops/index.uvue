@@ -1,0 +1,237 @@
+<template>
+  <view class="page-shell">
+    <scroll-view
+      class="page-scroll"
+      direction="vertical"
+      :show-scrollbar="false"
+      :refresher-enabled="true"
+      :refresher-triggered="refreshing"
+      @refresherrefresh="pullRefresh"
+    >
+      <view class="page-content page-content-with-tabs">
+        <tm-header title="电脑" action-text="添加" @action="goPairing" />
+        <notice-banner v-if="banner.length > 0" tone="warning" :text="banner" action-text="重试" @action="refresh" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="list" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法载入电脑" :detail="errorMessage" action-text="重试" @action="refresh" />
+        <ui-state v-else-if="active.length == 0" mode="empty" title="尚未绑定电脑" detail="在 Token M Desktop 输入配对码即可连接。" action-text="生成配对码" @action="goPairing" />
+        <view v-else>
+          <view class="desktop-list">
+            <view v-for="item in active" :key="item.desktopId" class="desktop-card surface">
+              <view v-if="editingId == item.desktopId">
+                <text class="form-label rename-label">电脑名称</text>
+                <input v-model="editingName" class="input" type="text" :maxlength="80" />
+                <view class="inline-actions">
+                  <button class="small-action" @click="cancelRename">取消</button>
+                  <button class="small-action primary" @click="saveRename(item.desktopId)">保存</button>
+                </view>
+              </view>
+              <view v-else>
+                <text class="desktop-name">{{ item.name }}</text>
+                <status-marker class="desktop-marker" :tone="desktopStatusView(item).tone" :label="desktopStatusView(item).label" />
+                <text class="desktop-meta">{{ desktopStatusView(item).detail }}</text>
+                <text class="desktop-meta">创建于 {{ formatDateTime(item.createdAt) }}</text>
+                <text class="desktop-meta">{{ item.lastEventAt == null ? '尚未上报任务' : '最后上报 ' + formatRelativeTime(item.lastEventAt, Date.now()) }}</text>
+                <view class="inline-actions">
+                  <button class="small-action" @click="beginRename(item)">重命名</button>
+                  <button class="small-action danger" @click="confirmUnbind(item)">解除绑定</button>
+                </view>
+              </view>
+            </view>
+          </view>
+          <button class="btn btn-primary section" hover-class="btn-primary-active" @click="goPairing">绑定另一台电脑</button>
+        </view>
+
+        <view v-if="revoked.length > 0" class="section">
+          <button class="revoked-toggle" @click="showRevoked = !showRevoked">
+            {{ showRevoked ? '收起' : '查看' }}已解绑电脑（{{ revoked.length }}）
+          </button>
+          <view v-if="showRevoked" class="plain-list">
+            <view v-for="(item, index) in revoked" :key="item.desktopId" :class="['row', index == revoked.length - 1 ? 'row-last' : '']">
+              <view class="row-main">
+                <text class="row-title">{{ item.name }}</text>
+                <text class="row-meta">已解绑 · 创建于 {{ formatDateTime(item.createdAt) }}</text>
+                <text class="row-meta">{{ item.lastSeenAt == null ? '尚未在线' : '最后在线 ' + formatDateTime(item.lastSeenAt) }}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+    <tm-tab-bar selected="desktops" />
+  </view>
+</template>
+
+<script setup lang="uts">
+import { nextTick, ref } from 'vue'
+import { onReady, onShow } from '@dcloudio/uni-app'
+import { listDesktops, renameDesktop, unbindDesktop } from '../../services/client.uts'
+import { canReuseProtectedPageData, ensureProtectedClientRoute } from '../../services/client-runtime.uts'
+import { desktopStatusView, formatDateTime, formatRelativeTime, presentError } from '../../services/presentation.uts'
+import type { DesktopRecord, UiLoadState } from '../../types/models.uts'
+import { desktopsSnapshot, getPageCacheSession, isPageCacheSessionCurrent } from '../../services/page-cache.uts'
+import { PageTiming } from '../../services/navigation-perf.uts'
+
+const state = ref<UiLoadState>('loading')
+const active = ref<DesktopRecord[]>([])
+const revoked = ref<DesktopRecord[]>([])
+const showRevoked = ref(false)
+const editingId = ref('')
+const editingName = ref('')
+const working = ref(false)
+const banner = ref('')
+const errorMessage = ref('')
+const refreshing = ref(false)
+const timing = new PageTiming('/pages/desktops/index')
+let loading = false
+
+const restoreCached = () => {
+  const cached = canReuseProtectedPageData() ? desktopsSnapshot.peek() : null
+  if (cached == null) {
+    active.value = []
+    revoked.value = []
+    state.value = 'loading'
+    return
+  }
+  active.value = cached.filter((item) => item.status == 'active')
+  revoked.value = cached.filter((item) => item.status == 'revoked')
+  state.value = 'ready'
+  nextTick(() => { timing.cachedReady() })
+}
+restoreCached()
+
+const runLoad = async (keepExisting: boolean) => {
+  if (loading) return
+  loading = true
+  const session = getPageCacheSession()
+  const previousUpdate = desktopsSnapshot.updatedAt
+  if (!keepExisting) state.value = 'loading'
+  try {
+    if (!await ensureProtectedClientRoute()) return
+    if (!isPageCacheSessionCurrent(session)) return
+    const items = await listDesktops()
+    if (!isPageCacheSessionCurrent(session)) return
+    active.value = items.filter((item) => item.status == 'active')
+    revoked.value = items.filter((item) => item.status == 'revoked')
+    banner.value = ''
+    state.value = 'ready'
+    nextTick(() => {
+      if (desktopsSnapshot.updatedAt > previousUpdate) timing.freshReady()
+      else timing.cachedReady()
+    })
+  } catch (error) {
+    if (!isPageCacheSessionCurrent(session)) return
+    const shown = presentError(error, '服务暂时不可用，请稍后重试。')
+    if (keepExisting) banner.value = `更新失败，当前显示上次数据：${shown}`
+    else {
+      errorMessage.value = shown
+      state.value = 'error'
+    }
+  } finally {
+    loading = false
+  }
+}
+
+const refresh = () => {
+  desktopsSnapshot.expire()
+  runLoad(state.value == 'ready')
+}
+
+const runPullRefresh = async () => {
+  if (refreshing.value) return
+  refreshing.value = true
+  desktopsSnapshot.expire()
+  try {
+    await runLoad(state.value == 'ready')
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const pullRefresh = () => {
+  runPullRefresh()
+}
+const goPairing = () => {
+  uni.navigateTo({ url: '/pages/pairing/index' })
+}
+
+const beginRename = (desktop: DesktopRecord) => {
+  editingId.value = desktop.desktopId
+  editingName.value = desktop.name
+}
+
+const cancelRename = () => {
+  editingId.value = ''
+  editingName.value = ''
+}
+
+const runSaveRename = async (desktopId: string) => {
+  if (working.value) return
+  const name = editingName.value.trim()
+  if (name.length == 0 || name.length > 80) {
+    uni.showToast({ title: '请输入 1–80 个字符', icon: 'none' })
+    return
+  }
+  working.value = true
+  try {
+    await renameDesktop(desktopId, name)
+    cancelRename()
+    await runLoad(true)
+    uni.showToast({ title: '名称已更新', icon: 'none' })
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '服务暂时不可用，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const saveRename = (desktopId: string) => {
+  runSaveRename(desktopId)
+}
+
+const runUnbind = async (desktop: DesktopRecord) => {
+  working.value = true
+  try {
+    await unbindDesktop(desktop.desktopId)
+    await runLoad(true)
+    uni.showToast({ title: '电脑已解绑', icon: 'none' })
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '服务暂时不可用，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const confirmUnbind = (desktop: DesktopRecord) => {
+  if (working.value) return
+  uni.showModal({
+    title: '解绑这台电脑',
+    content: `解绑“${desktop.name}”后，它将无法上报新任务；已有记录会保留。`,
+    confirmText: '解绑电脑',
+    confirmColor: '#c24152',
+    success: (result) => {
+      if (!result.confirm) return
+      runUnbind(desktop)
+    }
+  })
+}
+
+onShow(() => {
+  restoreCached()
+  runLoad(state.value == 'ready')
+})
+onReady(() => { timing.shellReady() })
+</script>
+
+<style lang="scss">
+.desktop-list { margin-top: 12px; }
+.desktop-card { margin-bottom: 12px; padding: 16px; }
+.desktop-name { color: $tm-text-1; font-size: $tm-type-card; font-weight: 600; line-height: 22px; }
+.desktop-marker { margin-top: 4px; }
+.desktop-meta { margin-top: 3px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.inline-actions { flex-direction: row; margin-top: 10px; padding-top: 6px; border-top-width: 1px; border-top-style: solid; border-top-color: $tm-line; }
+.small-action { min-width: 0; min-height: 48px; flex: 1; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; }
+.small-action.primary { color: $tm-text-1; }
+.small-action.danger { flex: 0; min-width: 96px; color: $tm-danger; font-size: 12px; }
+.rename-label { margin-top: 0; }
+.revoked-toggle { width: 100%; min-height: 48px; color: $tm-text-3; background-color: transparent; font-size: 12px; line-height: 48px; }
+</style>

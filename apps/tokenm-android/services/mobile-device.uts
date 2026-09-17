@@ -1,0 +1,55 @@
+import { uniIdCo } from './auth-service.uts'
+import { getOfficialPushClientId } from './push-runtime.uts'
+import type { MobileRegistrationFact, NotificationPermissionState } from '../types/models.uts'
+
+const tokenmCo = uniCloud.importObject('tokenm-co', { customUI: true })
+const DEVICE_LABEL_KEY = 'tokenm.device.label.v1'
+
+export const currentDeviceLabel = (): string => {
+  const stored = uni.getStorageSync(DEVICE_LABEL_KEY)
+  return typeof stored == 'string' && stored.trim().length > 0 ? stored.trim() : 'Android 设备'
+}
+
+const writeBusinessDevice = async (
+  enabled: boolean,
+  permissionState: NotificationPermissionState,
+  pushRegistrationStatus: MobileRegistrationFact
+): Promise<void> => {
+  // tokenm-co takes platform and appVersion from trusted clientInfo. Its input deliberately has no CID.
+  await tokenmCo.registerMobileDevice({
+    enabled,
+    deviceLabel: currentDeviceLabel(),
+    notificationPermissionState: permissionState,
+    pushRegistrationStatus
+  })
+}
+
+export const registerCurrentMobileDevice = async (
+  permissionState: NotificationPermissionState
+): Promise<void> => {
+  try {
+    const cid = await getOfficialPushClientId()
+    await uniIdCo.setPushCid({ pushClientId: cid })
+    await tokenmCo.registerMobileDevice({
+      enabled: true,
+      deviceLabel: currentDeviceLabel(),
+      notificationPermissionState: permissionState,
+      pushRegistrationStatus: 'ready'
+    })
+  } catch (error) {
+    try {
+      await writeBusinessDevice(true, permissionState, 'error')
+    } catch (_registrationError) {
+      // Preserve the original CID or uni-id binding failure for the caller.
+    }
+    throw error
+  }
+}
+
+export const disableCurrentMobileDevice = async (
+  permissionState: NotificationPermissionState,
+  previousStatus: MobileRegistrationFact
+): Promise<void> => {
+  const status: MobileRegistrationFact = previousStatus == 'ready' ? 'ready' : 'notStarted'
+  await writeBusinessDevice(false, permissionState, status)
+}

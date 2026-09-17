@@ -1,0 +1,180 @@
+import type { AccountProfile, CaptchaChallenge } from '../types/models.uts'
+
+const SESSION_USERNAME_KEY = 'tokenm.session.username.v1'
+
+// uni-id-co is supplied by the official local uni-id-pages-x module.
+// customUI keeps errors in Token M's own UI instead of invoking a framework dialog.
+export const uniIdCo = uniCloud.importObject('uni-id-co', { customUI: true })
+
+const storedUsername = (): string => {
+  const value = uni.getStorageSync(SESSION_USERNAME_KEY)
+  return typeof value == 'string' ? value : ''
+}
+
+const authErrorCode = (error: any | null): string => {
+  if (error == null) return ''
+  const value = error as UniCloudError
+  const rawCode = value.errCode
+  return rawCode == null ? '' : `${rawCode}`
+}
+
+const logRegisterFailure = (error: any | null): void => {
+  const code = authErrorCode(error)
+  const safeCode = code.length > 0 ? code : 'unknown'
+  const errorType = error == null ? 'null' : typeof error
+  console.warn('[auth] registerUser failure', `operation=registerUser errCode=${safeCode} errorType=${errorType}`)
+}
+
+export const getCurrentAccountProfile = (): AccountProfile => {
+  const userInfo = uniCloud.getCurrentUserInfo()
+  const userId = userInfo.uid == null ? '' : `${userInfo.uid}`
+  const authenticated = userId.length > 0 && userInfo.tokenExpired > Date.now()
+  return {
+    userId: authenticated ? userId : '',
+    username: authenticated ? storedUsername() : '',
+    authenticated
+  }
+}
+
+const SVG_UTF8_PREFIX = 'data:image/svg+xml;utf8,'
+const SVG_BASE64_PREFIX = 'data:image/svg+xml;base64,'
+const HEX_DIGITS = '0123456789abcdefABCDEF'
+
+const isHexDigit = (value: string): boolean => {
+  return value.length == 1 && HEX_DIGITS.indexOf(value) >= 0
+}
+
+// uni-id-co calls uni-captcha with cloud-object platform="app". Its SVG URI
+// contains encoded XML delimiters (%3C/%3E), encoded colors (%23), and bare
+// percentage attributes such as 100%. Decode only valid percent-byte runs so
+// literal percentages remain literal while UTF-8 escape sequences stay intact.
+const decodeSvgUriPayload = (value: string): string => {
+  let output = ''
+  let index = 0
+  while (index < value.length) {
+    const current = value.substring(index, index + 1)
+    const hasEncodedByte = current == '%' && index + 2 < value.length &&
+      isHexDigit(value.substring(index + 1, index + 2)) &&
+      isHexDigit(value.substring(index + 2, index + 3))
+    if (!hasEncodedByte) {
+      output += current
+      index += 1
+      continue
+    }
+
+    let encodedRun = ''
+    while (index + 2 < value.length &&
+      value.substring(index, index + 1) == '%' &&
+      isHexDigit(value.substring(index + 1, index + 2)) &&
+      isHexDigit(value.substring(index + 2, index + 3))) {
+      encodedRun += value.substring(index, index + 3)
+      index += 3
+    }
+    output += decodeURIComponent(encodedRun)
+  }
+  return output
+}
+
+const normalizeCaptchaUri = (value: string): string => {
+  if (!value.startsWith(SVG_UTF8_PREFIX)) {
+    throw new Error('验证码图片格式不是 SVG UTF-8 URI')
+  }
+  const svgText = decodeSvgUriPayload(value.substring(SVG_UTF8_PREFIX.length))
+  const trimmedSvg = svgText.trim()
+  const hasSvgRoot = trimmedSvg.startsWith('<svg') || trimmedSvg.startsWith('<?xml')
+  if (!hasSvgRoot || !trimmedSvg.endsWith('</svg>')) {
+    throw new Error('验证码 SVG 结构无效')
+  }
+  const bytes = new TextEncoder().encode(svgText)
+  const arrayBuffer = new ArrayBuffer(bytes.length)
+  const target = new Uint8Array(arrayBuffer)
+  target.set(bytes)
+  const encoded = uni.arrayBufferToBase64(arrayBuffer)
+  return `${SVG_BASE64_PREFIX}${encoded}`
+}
+
+const mapCaptchaResult = (scene: string, result: UTSJSONObject): CaptchaChallenge => {
+  const rawCaptchaBase64 = result.getString('captchaBase64')
+  if (rawCaptchaBase64 == null || rawCaptchaBase64.length == 0) {
+    throw new Error('验证码响应缺少 captchaBase64')
+  }
+  const captchaBase64 = normalizeCaptchaUri(rawCaptchaBase64)
+  if (captchaBase64.length == 0) {
+    throw new Error('验证码响应缺少 captchaBase64')
+  }
+  return { scene, captchaBase64 }
+}
+
+export const createOfficialCaptcha = async (scene: string): Promise<CaptchaChallenge> => {
+  console.info('[captcha] create start', scene)
+  try {
+    const result = await uniIdCo.createCaptcha({ scene })
+    const challenge = mapCaptchaResult(scene, result)
+    const normalizedLength = challenge.captchaBase64.length
+    console.info('[captcha] create success', scene, normalizedLength, 'svg-base64')
+    return challenge
+  } catch (_error) {
+    console.warn('[captcha] create failure', scene)
+    throw _error
+  }
+}
+
+export const refreshOfficialCaptcha = async (scene: string): Promise<CaptchaChallenge> => {
+  console.info('[captcha] refresh start', scene)
+  try {
+    const result = await uniIdCo.refreshCaptcha({ scene })
+    const challenge = mapCaptchaResult(scene, result)
+    const normalizedLength = challenge.captchaBase64.length
+    console.info('[captcha] refresh success', scene, normalizedLength, 'svg-base64')
+    return challenge
+  } catch (_error) {
+    console.warn('[captcha] refresh failure', scene)
+    throw _error
+  }
+}
+
+export const loginWithUniId = async (
+  username: string,
+  password: string,
+  captcha: string
+): Promise<AccountProfile> => {
+  const normalizedUsername = username.trim()
+  if (captcha.trim().length > 0) {
+    await uniIdCo.login({ username: normalizedUsername, password, captcha: captcha.trim() })
+  } else {
+    await uniIdCo.login({ username: normalizedUsername, password })
+  }
+  uni.setStorageSync(SESSION_USERNAME_KEY, normalizedUsername)
+  return getCurrentAccountProfile()
+}
+
+export const registerWithUniId = async (
+  username: string,
+  password: string,
+  captcha: string
+): Promise<AccountProfile> => {
+  const normalizedUsername = username.trim()
+  try {
+    // The official uniCloud object wrapper consumes registerUser's response.newToken
+    // and persists the uni-id session. Keep token handling inside that SDK boundary.
+    await uniIdCo.registerUser({
+      username: normalizedUsername,
+      password,
+      captcha: captcha.trim()
+    })
+  } catch (error) {
+    logRegisterFailure(error)
+    throw error
+  }
+  uni.setStorageSync(SESSION_USERNAME_KEY, normalizedUsername)
+  return getCurrentAccountProfile()
+}
+
+export const logoutWithUniId = async (): Promise<void> => {
+  await uniIdCo.logout()
+  uni.removeStorageSync(SESSION_USERNAME_KEY)
+}
+
+export const closeAccountWithUniId = async (): Promise<void> => {
+  await uniIdCo.closeAccount()
+}

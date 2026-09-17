@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -14,14 +13,9 @@ try {
 const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = trackingApi;
 const rootDir = path.join(__dirname, '..', '..');
 
-function rendererClientIds() {
-  const app = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/app.js'), 'utf8');
-  const block = app.slice(app.indexOf('const KNOWN_CLIENTS = ['), app.indexOf('const LIMIT_PROVIDERS'));
-  return [...block.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1]);
-}
-
 function readmeTrackedClientIds() {
   const iconToClient = {
+    deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
     'mimo-code': 'micode',
@@ -46,7 +40,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix']) {
+  for (const client of ['cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -68,26 +62,34 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
   }
 });
 
-test('tracked client defaults, renderer, and README share one display order', () => {
+// The renderer is no longer a third party to compare against: it destructures
+// the same catalog these CSVs are projected from, so asserting it here would be
+// the catalog against itself. That the renderer actually consumes the catalog is
+// guarded in tests/electron/rendererClientLabels.test.js. README stays a real
+// cross-check because it is hand-authored.
+test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
-  assert.deepEqual(rendererClientIds(), known);
   assert.deepEqual(readmeTrackedClientIds(), known);
   assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
 });
 
-test('default tracked clients are supported by tokscale or a native adapter', () => {
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix is supported by the
-  // bundled Tokscale version and must be verified through its real client list.
-  const locallyParsedClients = new Set(['proma', 'qodercn']);
-  const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const help = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
-  assert.ok(possibleValues, 'tokscale --help should list --client possible values');
-  const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
-  assert.deepEqual(unsupported, []);
+test('documented client CSV follows the canonical catalog order', () => {
+  const envExample = fs.readFileSync(path.join(rootDir, '.env.example'), 'utf8');
+  const documented = envExample.match(/^TOKEN_MONITOR_CLIENTS=(.*)$/m)?.[1].split(',') || [];
+  const documentedSet = new Set(documented);
+  assert.deepEqual(
+    documented,
+    KNOWN_CLIENTS.split(',').filter((id) => documentedSet.has(id))
+  );
 });
+
+// "default tracked clients are supported by tokscale or a native adapter" —
+// this contract lives in scripts/verify-vendored-tokscale-clients.js instead
+// of here. It has to run against the real vendored tokscale binary
+// (vendor-tokscale.yml), not the plain npm-installed one: a client can be
+// merged upstream and pinned into the vendor build well before it's in a
+// tagged npm release (dsh, cherrystudio), so checking the npm binary here
+// would just be testing an executable packaged releases don't ship.
 
 test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {
   assert.equal(clientsCsvForSetting(''), '');
@@ -96,4 +98,5 @@ test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () 
 
 test('clientsCsvForSetting normalizes saved client csv values', () => {
   assert.equal(clientsCsvForSetting(' Claude , Codex,,hermes '), 'claude,codex,hermes');
+  assert.equal(clientsCsvForSetting('kilocode,kilo'), 'kilo');
 });

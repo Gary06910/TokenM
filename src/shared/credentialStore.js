@@ -14,23 +14,30 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   claudeWebCookie: ['providers', 'claude', 'webCookie'],
   opencodeCookie: ['providers', 'opencode', 'cookie'],
   opencodeProfiles: ['providers', 'opencode', 'profiles'],
-  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
-  deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
-  minimaxApiKey: ['providers', 'minimax', 'apiKey'],
+  factoryApiKey: ['providers', 'factory', 'apiKey'],
+  kimiApiKey: ['providers', 'kimi', 'apiKey'],
+  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   copilotApiToken: ['providers', 'copilot', 'apiToken'],
+  zedCookie: ['providers', 'zed', 'cookie'],
+  commandcodeCookie: ['providers', 'commandcode', 'cookie'],
   zaiApiKey: ['providers', 'zai', 'apiKey'],
   zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
   zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
   zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
+  qoderCookie: ['providers', 'qoder', 'cookie'],
+  deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
+  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
+  minimaxApiKey: ['providers', 'minimax', 'apiKey'],
   volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
   volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
-  qoderCookie: ['providers', 'qoder', 'cookie'],
-  commandcodeCookie: ['providers', 'commandcode', 'cookie'],
-  kimiApiKey: ['providers', 'kimi', 'apiKey'],
-  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
+  volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
+  volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
   ollamaCookie: ['providers', 'ollama', 'cookie'],
+  traeAccessToken: ['providers', 'trae', 'accessToken'],
+  traeDeviceId: ['providers', 'trae', 'deviceId'],
+  alibabaCookie: ['providers', 'alibaba', 'cookie'],
   thirdPartyProfiles: ['providers', 'thirdparty', 'profiles'],
-  tokenMWeChatCredential: ['tokenM', 'weChatCredential']
+  tokenMAndroidCredential: ['tokenM', 'androidCredential']
 });
 
 function emptyDocument() {
@@ -356,6 +363,31 @@ class CredentialStore {
     deleteValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId]);
     this.writeDocument(document);
     return !this.readMimoCredential(accountId);
+  }
+
+  readAntigravityCredential(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return null;
+    const value = valueAt(document.credentials, ['providers', 'antigravity', 'accounts', accountId, 'credentials']);
+    return isObject(value) ? cloneJson(value) : null;
+  }
+
+  writeAntigravityCredential(id, credentials) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !credentialValuePresent(credentials)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'antigravity', 'accounts', accountId, 'credentials'], credentials);
+    this.writeDocument(document);
+    return true;
+  }
+
+  removeAntigravityCredential(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'antigravity', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readAntigravityCredential(accountId);
   }
 
   migrateLegacyMimoCredentials(entries) {

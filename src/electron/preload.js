@@ -6,10 +6,10 @@ contextBridge.exposeInMainWorld('tokenMNotifications', {
   getStatus: () => ipcRenderer.invoke('notifications:getStatus'),
   enableCodexHook: () => ipcRenderer.invoke('notifications:enableCodexHook'),
   disableCodexHook: () => ipcRenderer.invoke('notifications:disableCodexHook'),
-  pairWeChat: (request) => ipcRenderer.invoke('notifications:pairWeChat', request),
-  setWeChatEnabled: (enabled) => ipcRenderer.invoke('notifications:setWeChatEnabled', enabled),
-  setWeChatPrivacyMode: (privacyMode) => ipcRenderer.invoke('notifications:setWeChatPrivacyMode', privacyMode),
-  unpairWeChat: () => ipcRenderer.invoke('notifications:unpairWeChat'),
+  pairAndroid: (request) => ipcRenderer.invoke('notifications:pairAndroid', request),
+  setAndroidEnabled: (enabled) => ipcRenderer.invoke('notifications:setAndroidEnabled', enabled),
+  setAndroidPrivacyMode: (privacyMode) => ipcRenderer.invoke('notifications:setAndroidPrivacyMode', privacyMode),
+  unpairAndroid: () => ipcRenderer.invoke('notifications:unpairAndroid'),
   onStatus: (callback) => {
     const listener = (_event, status) => { try { callback(status); } catch (_) {} };
     ipcRenderer.on('notifications:status', listener);
@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
+  getCodexResetForecast: (options) => ipcRenderer.invoke('codexResetForecast:get', options),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   getDashboardHistory: (options) => ipcRenderer.invoke('dashboard:getHistory', options),
   onDashboardHistoryChanged: (callback) => {
@@ -58,6 +59,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('stats:push', listener);
     return () => ipcRenderer.removeListener('stats:push', listener);
+  },
+  onWindowVisibilityPush: (callback) => {
+    const listener = (_event, visible) => { try { callback(Boolean(visible)); } catch (_) {} };
+    ipcRenderer.on('window:visibility', listener);
+    return () => ipcRenderer.removeListener('window:visibility', listener);
   },
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
@@ -88,10 +94,25 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),
+  pickCustomScanPath: (clientId) => ipcRenderer.invoke('usage:pickCustomScanPath', clientId),
   revealClientSource: (clientId) => ipcRenderer.invoke('usage:revealClientSource', clientId),
+  revealClientSyncLock: (clientId) => ipcRenderer.invoke('usage:revealClientSyncLock', clientId),
   rescanClient: (clientId) => ipcRenderer.invoke('usage:rescanClient', clientId),
+  repairClientSyncLock: (clientId) => ipcRenderer.invoke('usage:repairClientSyncLock', clientId),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  antigravity: {
+    accounts: () => ipcRenderer.invoke('antigravity:accounts'),
+    addAccount: () => ipcRenderer.invoke('antigravity:addAccount'),
+    cancelLogin: () => ipcRenderer.invoke('antigravity:cancelLogin'),
+    removeAccount: (id) => ipcRenderer.invoke('antigravity:removeAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('antigravity:setAccountEnabled', id, enabled),
+    onAccounts: (callback) => {
+      const handler = (_event, accounts) => callback(accounts);
+      ipcRenderer.on('antigravity:accounts', handler);
+      return () => ipcRenderer.removeListener('antigravity:accounts', handler);
+    }
+  },
   mimo: {
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
     addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
@@ -135,14 +156,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   setTrayIcons: (icons) => ipcRenderer.invoke('tray:setIcons', icons),
   cursor: {
     loginManual: (token) => ipcRenderer.invoke('cursor:loginManual', token),
-    logout: () => ipcRenderer.invoke('cursor:logout'),
-    status: () => ipcRenderer.invoke('cursor:status')
+    setAccountEnabled: (accountId, enabled) => ipcRenderer.invoke('cursor:setAccountEnabled', accountId, enabled),
+    logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
+    status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
   claude: {
     saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
   },
   ollama: {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
+  },
+  factory: {
+    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

@@ -1,0 +1,31 @@
+{
+	"name": "Token M",
+	"appid": "__UNI__46C9063",
+	"description": "Token M Android client",
+	"versionName": "0.1.1",
+	"versionCode": 1,
+	"uni-app-x": {},
+	"app": {
+		"defaultAppTheme": "light"
+	},
+	"app-android": {
+		"minSdkVersion": 21,
+		"distribute": {
+			"modules": {
+				"uni-push": {}
+			}
+		}
+	},
+	"app-ios": {
+		"distribute": {
+			"modules": {},
+			"icons": {},
+			"splashScreens": {}
+		}
+	},
+	"web": {
+		"router": {
+			"mode": ""
+		}
+	}
+}

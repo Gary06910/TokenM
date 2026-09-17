@@ -1,0 +1,54 @@
+import { dashboardSnapshot, tasksSnapshot, getPageCacheSession, isPageCacheSessionCurrent } from './page-cache.uts'
+import type { TaskRecord, TaskPageResult } from '../types/models.uts'
+
+const taskManagementCo = uniCloud.importObject('tokenm-co', { customUI: true })
+type TaskMutationResult = { ok: boolean }
+
+// Reuse the existing revision barrier: late reads cannot seed pre-delete data.
+export const applyTaskHistoryDeletion = (task: TaskRecord | null): void => {
+  const session = getPageCacheSession()
+  const list = tasksSnapshot.peek()
+  const home = dashboardSnapshot.peek()
+  tasksSnapshot.clear()
+  dashboardSnapshot.clear()
+  if (task == null) {
+    const empty: TaskPageResult = { items: [], nextCursor: null }
+    tasksSnapshot.seed(empty, session, tasksSnapshot.revision)
+  } else if (list != null) {
+    list.items = list.items.filter((item) => item.taskId != task.taskId)
+    tasksSnapshot.seed(list, session, tasksSnapshot.revision)
+  }
+  if (home != null) {
+    if (task == null) {
+      home.recentTasks = []
+      home.todayCompletedCount = 0
+    } else {
+      home.recentTasks = home.recentTasks.filter((item) => item.taskId != task.taskId)
+      const occurred = new Date(task.occurredAt)
+      const today = new Date()
+      if (occurred.getFullYear() == today.getFullYear() && occurred.getMonth() == today.getMonth() && occurred.getDate() == today.getDate()) {
+        home.todayCompletedCount = Math.max(0, home.todayCompletedCount - 1)
+      }
+    }
+    dashboardSnapshot.seed(home, session, dashboardSnapshot.revision)
+  }
+  // Keep the immediate result but allow the next read to include new arrivals.
+  tasksSnapshot.expire()
+  dashboardSnapshot.expire()
+}
+
+export const deleteTaskRecord = async (task: TaskRecord): Promise<void> => {
+  const session = getPageCacheSession()
+  const result = await taskManagementCo.deleteTask<TaskMutationResult>({ taskId: task.taskId })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  if (!result.ok) throw new Error('task_delete_failed')
+  applyTaskHistoryDeletion(task)
+}
+
+export const clearTaskRecords = async (): Promise<void> => {
+  const session = getPageCacheSession()
+  const result = await taskManagementCo.clearTasks<TaskMutationResult>({ confirmation: 'CLEAR' })
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  if (!result.ok) throw new Error('task_clear_failed')
+  applyTaskHistoryDeletion(null)
+}

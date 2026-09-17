@@ -1,0 +1,40 @@
+import type { PrivacyConsentRecord } from '../types/models.uts'
+import { getPageCacheSession, isPageCacheSessionCurrent } from './page-cache.uts'
+
+const tokenmCo = uniCloud.importObject('tokenm-co', { customUI: true })
+
+const mapConsent = (value: UTSJSONObject): PrivacyConsentRecord => ({
+  requiredVersion: value.getString('requiredVersion') ?? '',
+  acceptedVersion: value.getString('acceptedVersion'),
+  acceptedAt: value.getString('acceptedAt'),
+  isCurrent: value.getBoolean('isCurrent') ?? false
+})
+
+let consentInFlight: Promise<PrivacyConsentRecord> | null = null
+let consentSession = -1
+
+const readConsent = async (session: number): Promise<PrivacyConsentRecord> => {
+  const result = await tokenmCo.getPrivacyConsent({})
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  return mapConsent(result.privacyConsent as UTSJSONObject)
+}
+
+export const getCurrentPrivacyConsent = (): Promise<PrivacyConsentRecord> => {
+  const session = getPageCacheSession()
+  if (consentInFlight != null && consentSession == session) return consentInFlight!
+  const task = readConsent(session)
+  consentInFlight = task
+  consentSession = session
+  task.then(
+    () => { if (consentInFlight == task) consentInFlight = null },
+    () => { if (consentInFlight == task) consentInFlight = null }
+  )
+  return task
+}
+
+export const acceptRequiredPrivacyConsent = async (): Promise<PrivacyConsentRecord> => {
+  const current = await getCurrentPrivacyConsent()
+  if (current.requiredVersion.length == 0) throw new Error('privacy consent version unavailable')
+  const result = await tokenmCo.updatePrivacyConsent({ version: current.requiredVersion })
+  return mapConsent(result.privacyConsent as UTSJSONObject)
+}

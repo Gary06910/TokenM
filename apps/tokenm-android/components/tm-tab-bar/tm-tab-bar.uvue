@@ -1,0 +1,80 @@
+<template>
+  <view class="tabbar" role="tablist">
+    <view class="tabbar-content">
+      <view
+        v-for="item in items"
+        :key="item.key"
+        :class="['tab', selected == item.key ? 'tab-selected' : '']"
+        role="tab"
+        :aria-label="item.label"
+        :aria-selected="selected == item.key"
+        hover-class="tab-active"
+        @click="switchTab(item.key, item.url)"
+      >
+        <view :class="['tab-icon', 'icon-' + item.key]">
+          <view class="icon-detail detail-one"></view>
+          <view class="icon-detail detail-two"></view>
+        </view>
+        <text class="tab-label">{{ item.label }}</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { navigateColumn } from '../../services/navigation-perf.uts'
+type TabItem = { key: string, label: string, url: string }
+type TmTabBarProps = { selected?: string }
+
+const props = withDefaults(defineProps<TmTabBarProps>(), { selected: 'home' })
+const items: TabItem[] = [
+  { key: 'home', label: '首页', url: '/pages/dashboard/index' },
+  { key: 'tasks', label: '任务', url: '/pages/tasks/index' },
+  { key: 'desktops', label: '电脑', url: '/pages/desktops/index' },
+  { key: 'settings', label: '设置', url: '/pages/settings/index' }
+]
+
+const switchTab = (key: string, url: string) => {
+  if (key == props.selected) return
+  navigateColumn(url)
+}
+</script>
+
+<style lang="scss">
+.tabbar {
+  position: fixed;
+  z-index: 50;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top-width: 1px;
+  border-top-style: solid;
+  border-top-color: $tm-line;
+  background-color: $tm-bg-raised;
+}
+.tabbar-content { height: 64px; flex-direction: row; padding-right: 8px; padding-left: 8px; }
+.tab { min-width: 0; min-height: 64px; flex: 1; align-items: center; justify-content: center; color: $tm-text-3; }
+.tab-active { opacity: 0.68; }
+.tab-icon { width: 20px; height: 20px; align-items: center; justify-content: center; border-width: 2px; border-style: solid; border-color: $tm-text-3; }
+.icon-home { border-top-left-radius: 9px; border-top-right-radius: 9px; border-bottom-left-radius: 3px; border-bottom-right-radius: 3px; }
+.icon-tasks { border-radius: 3px; }
+.icon-desktops { width: 22px; height: 16px; margin-top: 2px; border-radius: 2px; }
+.icon-settings { border-radius: 10px; }
+.icon-detail { background-color: $tm-text-3; }
+.icon-tasks .icon-detail { width: 10px; height: 1px; }
+.icon-tasks .detail-two { margin-top: 4px; }
+.icon-desktops .detail-one { width: 8px; height: 2px; position: absolute; bottom: -5px; }
+.icon-desktops .detail-two { width: 14px; height: 1px; position: absolute; bottom: -7px; }
+.icon-settings .detail-one { width: 6px; height: 6px; border-radius: 3px; background-color: transparent; border-width: 1px; border-style: solid; border-color: $tm-text-3; }
+.icon-settings .detail-two { display: none; }
+.icon-home .detail-one { width: 6px; height: 7px; position: absolute; bottom: 0; background-color: transparent; border-left-width: 1px; border-left-style: solid; border-left-color: $tm-text-3; border-right-width: 1px; border-right-style: solid; border-right-color: $tm-text-3; }
+.icon-home .detail-two { display: none; }
+.tab-label { margin-top: 6px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.tab-selected .tab-icon { border-color: $tm-info; }
+.tab-selected .icon-detail { background-color: $tm-info; }
+.tab-selected .icon-settings .detail-one { background-color: transparent; border-color: $tm-info; }
+.tab-selected .icon-home .detail-one { background-color: transparent; border-left-color: $tm-info; border-right-color: $tm-info; }
+.tab-selected { border-radius: 12px; background-color: $tm-accent-soft; }
+.tab-selected .tab-label { color: $tm-info; font-weight: 600; }
+</style>

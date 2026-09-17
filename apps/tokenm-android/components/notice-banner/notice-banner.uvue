@@ -1,0 +1,47 @@
+<template>
+  <view :class="['notice', 'notice-' + tone]">
+    <text class="notice-text">{{ text }}</text>
+    <button v-if="actionText.length > 0" class="notice-action" @click="emitAction">{{ actionText }}</button>
+  </view>
+</template>
+
+<script setup lang="uts">
+type NoticeBannerProps = {
+  tone?: string,
+  text?: string,
+  actionText?: string
+}
+
+withDefaults(defineProps<NoticeBannerProps>(), {
+  tone: 'info',
+  text: '',
+  actionText: ''
+})
+
+const emit = defineEmits(['action'])
+const emitAction = () => {
+  emit('action')
+}
+</script>
+
+<style lang="scss">
+.notice {
+  min-height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: 8px;
+  padding-right: 12px;
+  padding-bottom: 8px;
+  padding-left: 12px;
+  border-left-width: 2px;
+  border-left-style: solid;
+  border-left-color: $tm-info;
+  border-radius: $tm-radius-md;
+  background-color: $tm-bg-raised;
+}
+.notice-text { min-width: 0; flex: 1; color: $tm-text-2; font-size: 13px; line-height: 20px; }
+.notice-action { min-width: 48px; min-height: 48px; margin-left: 6px; padding-right: 4px; padding-left: 4px; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; }
+.notice-success { border-left-color: $tm-success; }
+.notice-warning { border-left-color: $tm-warning; }
+.notice-danger { border-left-color: $tm-danger; }
+</style>

@@ -1,0 +1,162 @@
+# LEGACY_WECHAT_REMAINING_REFERENCES
+
+扫描范围：当前 repository 的 rg 默认非忽略文件；不扫描相邻备份、node_modules、dist、unpackage、.git 或用户私有配置。枚举文件仅用于分类，无敏感内容输出。
+
+ACTIVE_RUNTIME_WECHAT_REFERENCES: 0（src 全树另有自动负向 contract test）
+
+Android production URL 的 cloudbasefunction.cn 是当前 uniCloud HTTP 主机名，不能因为域名子串删除；这是 SHARED_CURRENT_ENDPOINT_EXCEPTION，不是旧微信请求。
+
+- `README.md` — MIGRATION_NOTE
+- `apps/tokenm-android/uni_modules/uni-captcha/changelog.md` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-captcha/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-cloud-s2s/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-config-center/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-config-center/uniCloud/cloudfunctions/common/uni-config-center/uni-id/config.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-config-center/uniCloud/cloudfunctions/common/uni-config-center/uni-open-bridge/config.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-common/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/changelog.md` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/components/uni-id-pages-x-agreements/uni-id-pages-x-agreements.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/components/uni-id-pages-x-avatar/uni-id-pages-x-avatar.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/components/uni-id-pages-x-fab-login/uni-id-pages-x-fab-login.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/config.uts` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/init.uts` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/lib/servicesList.uts` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/pages/login/login.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/pages/userinfo/deactivate/deactivate.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/pages/userinfo/setNickname/setNickname.uvue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/common/constants.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/config/permission.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/index.obj.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/third-party/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/third-party/weixin/account/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/third-party/weixin/normalize.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/third-party/weixin/utils.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/utils/config.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/utils/qq.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/lib/utils/weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/account/get-account-info.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/dev/get-supported-login-type.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/login/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/login/login-by-alipay.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/login/login-by-qq.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/login/login-by-weixin-mobile.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/login/login-by-weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/bind-alipay.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/bind-mobile-by-mp-weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/bind-qq.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/bind-weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/relate/unbind-weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/utils/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/cloudfunctions/uni-id-co/module/utils/secure-network-handshake-by-weixin.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/database/uni-id-log.schema.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-id-pages-x/uniCloud/database/uni-id-users.schema.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/changelog.md` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/readme.md` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/uniCloud/cloudfunctions/common/uni-open-bridge-common/config.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/uniCloud/cloudfunctions/common/uni-open-bridge-common/consts.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/uniCloud/cloudfunctions/common/uni-open-bridge-common/index.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-open-bridge-common/uniCloud/cloudfunctions/common/uni-open-bridge-common/weixin-server.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-popup/changelog.md` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-popup/components/uni-popup-share/uni-popup-share.vue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-popup/components/uni-popup/uni-popup.vue` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-popup/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-scss/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-transition/components/uni-transition/createAnimation.js` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/uni_modules/uni-transition/package.json` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/unpackage/resources/app-android/uniappx/app-android/src/index.kt` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `apps/tokenm-android/unpackage/resources/app-android/uniappx/app-android/src/uniCloud/cloudfunctions/GenCloudObjUniIdCo.kt` — SHARED_CURRENT_ENDPOINT_EXCEPTION
+- `docs/LEGACY_WECHAT_INVENTORY.md` — MIGRATION_NOTE
+- `docs/TOKEN_M_DESKTOP_UPSTREAM_INTEGRATION_AUDIT.md` — MIGRATION_NOTE
+- `docs/TOKEN_M_UPSTREAM_DELTA_MAP.md` — MIGRATION_NOTE
+- `docs/TOKEN_M_UPSTREAM_UPDATE_GUIDE.md` — MIGRATION_NOTE
+- `docs/agent-prompts/worker-a-ui.md` — HISTORICAL_DOC
+- `docs/agent-prompts/worker-b-backend.md` — HISTORICAL_DOC
+- `docs/agent-prompts/worker-c-desktop.md` — HISTORICAL_DOC
+- `docs/agent-prompts/worker-d-platform.md` — HISTORICAL_DOC
+- `docs/agent-prompts/worker-e-tests.md` — HISTORICAL_DOC
+- `docs/android/API_CONTRACT.md` — MIGRATION_NOTE
+- `docs/android/ARCHITECTURE.md` — MIGRATION_NOTE
+- `docs/android/DATA_MODEL.md` — MIGRATION_NOTE
+- `docs/android/E2E_TEST_PLAN.md` — MIGRATION_NOTE
+- `docs/android/MIGRATION.md` — MIGRATION_NOTE
+- `docs/android/TOKEN_M_ANDROID_PERFORMANCE_OPTIMIZATION_REPORT.md` — MIGRATION_NOTE
+- `docs/android/TOKEN_M_ANDROID_PHASE0_AUDIT.md` — MIGRATION_NOTE
+- `docs/android/TOKEN_M_ANDROID_PHASE2_PERFORMANCE_OPTIMIZED_BASELINE.md` — MIGRATION_NOTE
+- `docs/android/TOKEN_M_PHASE2_PUSH_PLAN.md` — MIGRATION_NOTE
+- `docs/wechat-miniapp/API_CONTRACT.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/ARCHITECTURE.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/DATA_MODEL.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/DEPLOYMENT.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/DESIGN_SYSTEM.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/HANDOFF_RECOVERY.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/OFFICIAL_PLATFORM_NOTES.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/PRIVACY.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/SECURITY_MODEL.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/SUBMISSION_CHECKLIST.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/TEST_MATRIX.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/TRIAL_CHECKLIST.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/UX_SPEC.md` — HISTORICAL_DOC
+- `docs/wechat-miniapp/WORK_PLAN.md` — HISTORICAL_DOC
+- `eslint.config.js` — HISTORICAL_DOC
+- `tests/android/clientLifecycle.test.js` — TEST_FIXTURE
+- `tests/android/clientStructure.test.js` — TEST_FIXTURE
+- `tests/electron/androidClient.test.js` — TEST_FIXTURE
+- `tests/electron/androidOutbox.test.js` — TEST_FIXTURE
+- `tests/electron/androidSettings.test.js` — TEST_FIXTURE
+- `tests/electron/tokenMIntegrationContract.test.js` — TEST_FIXTURE
+- `tests/electron/tokenMNotificationTarget.test.js` — TEST_FIXTURE
+- `tests/helpers/tokenmRendererAcceptance.cjs` — TEST_FIXTURE
+- `wechat-miniapp/README.md` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/README.md` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/index.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/lib/config.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/lib/errors.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/lib/repository.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/lib/sender.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/lib/service.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/package-lock.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/package.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/test/backend.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/test/diagnostic-v2.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/test/packaging.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/test/repository.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/cloudfunctions/tokenm-api/tools/reconcile-unknown.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/README.md` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/cloudbase-deployment.example.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/cloudfunction.env.example.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/fixtures/invalid-public-project.absolute-root.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/miniprogram-runtime.example.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/scan-secrets.mjs` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/config/validate-platform-config.mjs` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/app.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/config/runtime.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/fixtures/mock-states.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/about/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/dashboard/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/pairing/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/privacy/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/quota/index.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/quota/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/pages/settings/index.wxml` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/services/api.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/services/presentation.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/miniprogram/sitemap.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/project.config.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/project.private.config.example.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/contract.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/fixtures/project-layout/miniprogram/config/runtime.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/fixtures/project-layout/project.config.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/fixtures/secret-scan-allowlist.json` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/helpers/createHarness.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/helpers/mockWeChatSender.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/p0-e2e.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/reference/contractModel.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `wechat-miniapp/tests/ui-states.test.js` — HISTORICAL_DOC；独立旧项目源码/配置，不是当前 Desktop runtime。
+- `worker/README.md` — HISTORICAL_DOC
+- `worker/README.zh-CN.md` — HISTORICAL_DOC
+- `worker/README.zh-TW.md` — HISTORICAL_DOC
+- `docs/LEGACY_WECHAT_REMAINING_REFERENCES.md` — MIGRATION_NOTE
+- `docs/TOKEN_M_DESKTOP_WECHAT_LEGACY_REMOVAL_REPORT.md` — MIGRATION_NOTE

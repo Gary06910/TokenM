@@ -1,0 +1,14 @@
+{
+  "name": "tokenm-co",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "cloudfunction-config": {
+    "runtime": "Nodejs18",
+    "timeout": 10
+  },
+  "dependencies": {
+    "uni-id-common": "file:../../../uni_modules/uni-id-common/uniCloud/cloudfunctions/common/uni-id-common",
+    "tokenm-core": "file:../common/tokenm-core"
+  }
+}

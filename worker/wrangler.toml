@@ -1,10 +1,6 @@
 name = "token-monitor-hub"
 main = "src/index.js"
 compatibility_date = "2025-05-01"
-compatibility_flags = ["nodejs_compat"]
-
-workers_dev = true
-preview_urls = false
 
 [[durable_objects.bindings]]
 name = "HUB"

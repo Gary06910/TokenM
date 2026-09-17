@@ -1,0 +1,28 @@
+<template>
+  <view :class="['status-marker', 'tone-' + tone]" :aria-label="label">
+    <view class="status-dot"></view>
+    <text class="status-label">{{ label }}</text>
+  </view>
+</template>
+
+<script setup lang="uts">
+type StatusMarkerProps = {
+  tone?: string,
+  label?: string
+}
+
+withDefaults(defineProps<StatusMarkerProps>(), {
+  tone: 'neutral',
+  label: ''
+})
+</script>
+
+<style lang="scss">
+.status-marker { min-width: 0; flex-direction: row; align-items: center; }
+.status-dot { width: 6px; height: 6px; margin-right: 6px; border-radius: 3px; background-color: $tm-text-3; }
+.status-label { min-width: 0; flex: 1; color: $tm-text-2; font-size: 12px; line-height: 18px; }
+.tone-success .status-dot { background-color: $tm-success; }
+.tone-warning .status-dot { background-color: $tm-warning; }
+.tone-danger .status-dot { background-color: $tm-danger; }
+.tone-info .status-dot { background-color: $tm-info; }
+</style>

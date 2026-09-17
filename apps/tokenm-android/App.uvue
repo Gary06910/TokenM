@@ -1,0 +1,141 @@
+<script lang="uts">
+import { bootstrapClientRuntime } from './services/client-runtime.uts'
+
+export default {
+  onLaunch() {
+    // All push work remains inside the guarded runtime. App never requests permission itself.
+    bootstrapClientRuntime().catch((_error) => {
+      // The first page exposes retry UI; startup deliberately remains fail-closed.
+    })
+  },
+  onShow() {
+    bootstrapClientRuntime().catch((_error) => {
+      // Foreground checks stop inside the guarded runtime when facts are no longer current.
+    })
+  }
+}
+</script>
+
+<style lang="scss">
+.page-shell {
+  flex: 1;
+  background-color: $tm-bg;
+  color: $tm-text-1;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+.page-scroll {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.page-content {
+  width: 100%;
+  padding-right: 16px;
+  padding-bottom: 24px;
+  padding-left: 16px;
+}
+.page-content-with-tabs { padding-bottom: 88px; }
+.page-title { margin-top: 12px; color: $tm-text-1; font-size: $tm-type-page; font-weight: 600; line-height: 32px; }
+.page-lead { margin-top: 4px; color: $tm-text-2; font-size: 14px; line-height: 23px; }
+.section { margin-top: $tm-space-12; }
+.section-head { flex-direction: row; min-height: 48px; align-items: center; justify-content: space-between; }
+.section-title { color: $tm-text-1; font-size: $tm-type-section; font-weight: 600; line-height: 24px; }
+.section-link {
+  min-width: 48px;
+  min-height: 48px;
+  padding-right: 4px;
+  padding-left: 4px;
+  color: $tm-info;
+  background-color: transparent;
+  font-size: 13px;
+  line-height: 48px;
+}
+.surface {
+  border-width: 1px;
+  border-style: solid;
+  border-color: $tm-line;
+  border-radius: $tm-radius-lg;
+  background-color: $tm-surface-1;
+}
+.plain-list { padding-right: 4px; padding-left: 4px; }
+.row {
+  min-height: 56px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: $tm-line;
+}
+.row-last { border-bottom-width: 0; }
+.row-press-active { background-color: $tm-surface-2; opacity: 0.86; }
+.row-main { min-width: 0; flex: 1; }
+.row-title { color: $tm-text-1; font-size: $tm-type-body; font-weight: 600; line-height: 22px; }
+.row-meta { margin-top: 2px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.row-side { margin-left: 10px; color: $tm-text-2; font-size: 12px; line-height: 18px; text-align: right; }
+.btn {
+  width: 100%;
+  min-height: $tm-touch;
+  align-items: center;
+  justify-content: center;
+  padding-top: 12px;
+  padding-right: 14px;
+  padding-bottom: 12px;
+  padding-left: 14px;
+  border-radius: $tm-radius-md;
+  color: $tm-text-1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+.btn-active { opacity: 0.9; }
+.btn-primary { color: #ffffff; background-color: $tm-accent; }
+.btn-primary-active { color: #ffffff; background-color: $tm-accent-pressed; opacity: 0.9; }
+.btn-secondary { border-width: 1px; border-style: solid; border-color: $tm-line-strong; background-color: transparent; }
+.btn-danger { border-width: 1px; border-style: solid; border-color: $tm-line; color: $tm-danger; background-color: transparent; }
+.btn-disabled { border-color: $tm-line; color: #7a8798; background-color: #e9eef5; }
+.btn-spaced { margin-top: 8px; }
+.text-button {
+  min-width: 48px;
+  min-height: 48px;
+  padding-right: 6px;
+  padding-left: 6px;
+  color: $tm-info;
+  background-color: transparent;
+  font-size: 13px;
+  line-height: 48px;
+}
+.form-label { margin-top: 16px; margin-bottom: 8px; color: $tm-text-2; font-size: 12px; line-height: 18px; }
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding-right: 12px;
+  padding-left: 12px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: $tm-line-strong;
+  border-radius: $tm-radius-md;
+  color: $tm-text-1;
+  background-color: $tm-surface-1;
+  font-size: 16px;
+}
+.detail-list { padding-right: 12px; padding-left: 12px; }
+.detail-row {
+  min-height: 52px;
+  flex-direction: row;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  border-bottom-color: $tm-line;
+}
+.detail-key { width: 72px; color: $tm-text-3; font-size: 12px; line-height: 20px; }
+.detail-value { min-width: 0; flex: 1; color: $tm-text-1; font-size: 14px; line-height: 22px; }
+.muted { color: $tm-text-3; }
+.group-label { margin-top: 24px; margin-bottom: 8px; color: $tm-text-2; font-size: $tm-type-secondary; font-weight: 600; line-height: 20px; }
+.brand-label { margin-bottom: 8px; color: $tm-info; font-size: $tm-type-secondary; font-weight: 600; line-height: 20px; }
+.privacy-caption { margin-top: 8px; color: $tm-text-2; font-size: $tm-type-caption; line-height: 18px; }
+</style>

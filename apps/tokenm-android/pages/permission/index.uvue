@@ -1,0 +1,299 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="任务通知" :back="true" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="dashboard" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法核对账户状态" :detail="errorMessage" action-text="重试" @action="load" />
+        <view v-else class="permission-body">
+          <view class="permission-mark"><view class="permission-dot"></view></view>
+          <text class="permission-title">准备任务完成提醒</text>
+          <text class="permission-copy">完成以下设置后，Codex 任务完成时即可接收提醒。关闭通知仍会保存任务记录。</text>
+          <view class="surface detail-list section fact-list">
+            <view class="detail-row"><text class="detail-key">登录</text><text class="detail-value">{{ loginFactView(facts.login).label }}</text></view>
+            <view class="detail-row"><text class="detail-key">隐私版本</text><text class="detail-value">{{ privacyVersionLabel }}</text></view>
+            <view class="detail-row"><text class="detail-key">系统权限</text><text class="detail-value">{{ permissionView(facts.notificationPermission).label }}</text></view>
+            <view class="detail-row"><text class="detail-key">电脑</text><text class="detail-value">{{ activeDesktopCountLabel }}</text></view>
+            <view class="detail-row"><text class="detail-key">任务通知</text><text class="detail-value">{{ notificationsEnabledLabel }}</text></view>
+            <view class="detail-row detail-row-last"><text class="detail-key">本机服务</text><text class="detail-value">{{ mobileRegistrationFactView(facts.mobileRegistration).label }}</text></view>
+          </view>
+
+          <notice-banner
+            v-if="bootstrapStatus.backend == 'unavailable'"
+            class="section"
+            tone="warning"
+            :text="backendStatusMessage"
+          />
+
+          <notice-banner
+            v-if="facts.login != 'signedIn'"
+            class="section"
+            tone="warning"
+            text="请先登录，再确认隐私说明并设置任务通知。"
+          />
+          <button v-if="facts.login != 'signedIn'" class="btn btn-primary section" hover-class="btn-primary-active" @click="goLogin">前往登录</button>
+
+          <view v-else-if="facts.privacyConsent != 'current'" class="consent-block">
+            <notice-banner class="section" tone="info" text="请阅读数据与隐私说明，再选择是否同意当前版本。" />
+            <view class="consent-row section">
+              <view class="consent-copy">
+                <text class="consent-title">隐私确认</text>
+                <text class="consent-detail">我已阅读数据与隐私说明，并同意当前版本。</text>
+              </view>
+              <switch :checked="privacyConfirmed" color="#2869c9" aria-label="隐私确认" @change="toggleConsent" />
+            </view>
+            <button class="privacy-link" @click="goPrivacy">查看数据与隐私说明</button>
+            <button
+              :class="['btn', 'btn-primary', privacyConfirmed && !working ? '' : 'btn-disabled']"
+              hover-class="btn-primary-active"
+              :disabled="!privacyConfirmed || working"
+              @click="acceptConsent"
+            >{{ working ? '正在保存…' : '同意当前隐私版本' }}</button>
+          </view>
+
+          <view v-else class="permission-actions">
+            <notice-banner v-if="facts.notificationPermission != 'authorized'" class="section" tone="info" text="点击开启后，按系统提示允许通知。你也可以稍后设置。" />
+            <view class="computer-actions section">
+              <button class="btn btn-secondary" hover-class="btn-active" :disabled="working" @click="goPairing">绑定电脑</button>
+              <button class="btn btn-secondary btn-spaced" hover-class="btn-active" :disabled="working" @click="goDesktops">查看电脑</button>
+            </view>
+            <button
+              v-if="facts.notificationPermission != 'authorized' || facts.mobileRegistration != 'ready'"
+              :class="['btn', 'btn-primary', 'section', working ? 'btn-disabled' : '']"
+              hover-class="btn-primary-active"
+              :disabled="working"
+              @click="requestNotificationPermissionFromCtaAction"
+            >{{ permissionActionLabel }}</button>
+            <button :class="['btn', 'btn-spaced', facts.notificationPermission == 'authorized' && facts.mobileRegistration == 'ready' ? 'btn-primary' : 'btn-secondary']" hover-class="btn-active" :disabled="working" @click="continueToApp">进入 App</button>
+            <button v-if="facts.mobileRegistration == 'error'" class="btn btn-secondary btn-spaced" hover-class="btn-active" :disabled="working" @click="retryRegistration">恢复通知服务</button>
+            <text class="permission-help">任务通知开关可在设置中管理。</text>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { computed, ref } from 'vue'
+import { onReady, onShow } from '@dcloudio/uni-app'
+import {
+  acceptCurrentPrivacyConsent,
+  bootstrapClientRuntime,
+  flushPendingNotificationRoute,
+  getRuntimeFacts,
+  markClientNavigationReady,
+  refreshMobileRegistration,
+  requestNotificationPermissionFromCta
+} from '../../services/client-runtime.uts'
+import { getClientBootstrapStatus } from '../../services/client.uts'
+import {
+  consentFactView,
+  loginFactView,
+  mobileRegistrationFactView,
+  permissionView,
+  presentError
+} from '../../services/presentation.uts'
+import type { ClientBootstrapStatus, RuntimeFacts, UiLoadState } from '../../types/models.uts'
+
+const state = ref<UiLoadState>('loading')
+const errorMessage = ref('')
+const privacyConfirmed = ref(false)
+const working = ref(false)
+const facts = ref<RuntimeFacts>(getRuntimeFacts())
+const bootstrapStatus = ref<ClientBootstrapStatus>({
+  backend: 'checking',
+  activeDesktopCount: null,
+  notificationsEnabled: null,
+  privacyConsent: null
+})
+const backendErrorMessage = ref('')
+
+const permissionActionLabel = computed((): string => {
+  if (working.value) return '正在处理…'
+  if (facts.value.notificationPermission == 'denied') return '打开系统通知设置'
+  if (facts.value.notificationPermission == 'authorized') return '连接通知服务'
+  return '开启系统通知'
+})
+
+const privacyVersionLabel = computed((): string => {
+  const status = bootstrapStatus.value
+  if (status.backend == 'available' && status.privacyConsent != null) {
+    const consent = status.privacyConsent!
+    if (consent.requiredVersion.length == 0) return '无法核对当前版本'
+    return consent.isCurrent ? `当前版本 ${consent.requiredVersion} 已同意` : `需要确认版本 ${consent.requiredVersion}`
+  }
+  if (status.backend == 'unavailable') return '无法核对当前版本（云端暂不可用）'
+  if (status.backend == 'notApplicable') return '登录后核对当前版本'
+  return consentFactView(facts.value.privacyConsent).label
+})
+
+const activeDesktopCountLabel = computed((): string => {
+  const status = bootstrapStatus.value
+  const count = status.activeDesktopCount
+  if (status.backend == 'available' && count != null) return `${count} 台电脑已绑定`
+  if (status.backend == 'unavailable') return '无法核对（云端暂不可用）'
+  if (status.backend == 'notApplicable') return '登录后核对云端电脑'
+  return '正在核对云端电脑'
+})
+
+const notificationsEnabledLabel = computed((): string => {
+  const status = bootstrapStatus.value
+  const enabled = status.notificationsEnabled
+  if (status.backend == 'available' && enabled != null) return enabled ? '任务通知已开启' : '任务通知已关闭'
+  if (status.backend == 'unavailable') return '无法核对（云端暂不可用）'
+  if (status.backend == 'notApplicable') return '登录后核对云端设置'
+  return '正在核对云端设置'
+})
+
+const backendStatusMessage = computed((): string => {
+  if (backendErrorMessage.value.length > 0) {
+    return `云端暂不可用，无法核对电脑绑定数量和任务通知设置：${backendErrorMessage.value}`
+  }
+  return '云端暂不可用，无法核对电脑绑定数量和任务通知设置；这里不会显示为未绑定或已完成。'
+})
+
+const runLoad = async () => {
+  state.value = 'loading'
+  errorMessage.value = ''
+  backendErrorMessage.value = ''
+  bootstrapStatus.value = {
+    backend: 'checking',
+    activeDesktopCount: null,
+    notificationsEnabled: null,
+    privacyConsent: null
+  }
+  try {
+    facts.value = await bootstrapClientRuntime()
+    if (facts.value.login == 'signedIn') {
+      try {
+        bootstrapStatus.value = await getClientBootstrapStatus()
+      } catch (error) {
+        bootstrapStatus.value = {
+          backend: 'unavailable',
+          activeDesktopCount: null,
+          notificationsEnabled: null,
+          privacyConsent: null
+        }
+        backendErrorMessage.value = presentError(error, '请稍后重试。')
+      }
+    } else {
+      bootstrapStatus.value = {
+        backend: 'notApplicable',
+        activeDesktopCount: null,
+        notificationsEnabled: null,
+        privacyConsent: null
+      }
+    }
+    state.value = 'ready'
+  } catch (error) {
+    bootstrapStatus.value = {
+      backend: 'unavailable',
+      activeDesktopCount: null,
+      notificationsEnabled: null,
+      privacyConsent: null
+    }
+    errorMessage.value = presentError(error, '无法核对登录或隐私确认状态，请稍后重试。')
+    state.value = 'error'
+  }
+}
+
+const load = () => {
+  runLoad()
+}
+
+const runAcceptConsent = async () => {
+  if (!privacyConfirmed.value || working.value) return
+  working.value = true
+  try {
+    facts.value = await acceptCurrentPrivacyConsent()
+    privacyConfirmed.value = false
+    await runLoad()
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '隐私确认保存失败，请重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const acceptConsent = () => {
+  runAcceptConsent()
+}
+
+const runRequestNotificationPermissionFromCtaAction = async () => {
+  if (working.value) return
+  working.value = true
+  try {
+    facts.value = await requestNotificationPermissionFromCta()
+    if (facts.value.recoveryCode == 'privacy_consent_required') {
+      uni.showToast({ title: '隐私说明已更新，请重新确认', icon: 'none' })
+    }
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '无法更新通知状态，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const requestNotificationPermissionFromCtaAction = () => {
+  runRequestNotificationPermissionFromCtaAction()
+}
+
+const runRetryRegistration = async () => {
+  if (working.value) return
+  working.value = true
+  try {
+    facts.value = await refreshMobileRegistration()
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '通知服务注册失败，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const retryRegistration = () => {
+  runRetryRegistration()
+}
+
+const continueToApp = () => {
+  if (facts.value.privacyConsent == 'current') uni.reLaunch({ url: '/pages/dashboard/index' })
+}
+const goPairing = () => {
+  uni.navigateTo({ url: '/pages/pairing/index' })
+}
+const goDesktops = () => {
+  uni.reLaunch({ url: '/pages/desktops/index' })
+}
+const toggleConsent = (event: UniSwitchChangeEvent) => { privacyConfirmed.value = event.detail.value }
+const goPrivacy = () => {
+  uni.navigateTo({ url: '/pages/privacy/index' })
+}
+const goLogin = () => {
+  uni.reLaunch({ url: '/pages/login/index' })
+}
+
+onShow(() => {
+  load()
+})
+onReady(() => {
+  markClientNavigationReady()
+  flushPendingNotificationRoute()
+})
+</script>
+
+<style lang="scss">
+.permission-body { align-items: center; padding-top: 16px; }
+.permission-mark { width: 56px; height: 56px; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: $tm-line-strong; border-radius: 16px; background-color: $tm-surface-1; }
+.permission-dot { width: 16px; height: 16px; border-width: 2px; border-style: solid; border-color: $tm-info; border-radius: 8px; }
+.permission-title { margin-top: 18px; color: $tm-text-1; font-size: 20px; font-weight: 600; line-height: 27px; text-align: center; }
+.permission-copy { max-width: 320px; margin-top: 8px; color: $tm-text-2; font-size: 14px; line-height: 23px; text-align: center; }
+.permission-help { max-width: 310px; margin-top: 10px; color: $tm-text-3; font-size: 12px; line-height: 18px; text-align: center; }
+.fact-list, .consent-block, .permission-actions { width: 100%; }
+.computer-actions { width: 100%; }
+.detail-row-last { border-bottom-width: 0; }
+.consent-row { width: 100%; min-height: 72px; flex-direction: row; align-items: center; }
+.consent-copy { min-width: 0; flex: 1; margin-right: 12px; }
+.consent-title { color: $tm-text-1; font-size: 14px; font-weight: 500; line-height: 21px; }
+.consent-detail { margin-top: 2px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.privacy-link { width: 100%; min-height: 48px; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; text-align: center; }
+</style>

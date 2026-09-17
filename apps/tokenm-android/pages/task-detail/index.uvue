@@ -1,0 +1,106 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="任务详情" :back="true" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="list" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法载入任务" :detail="errorMessage" action-text="重试" @action="load" />
+        <view v-else-if="task != null">
+          <view class="detail-head">
+            <text class="page-title">任务已完成</text>
+            <status-marker :tone="deliveryView(task.notificationStatus).tone" :label="deliveryView(task.notificationStatus).label" />
+            <text class="detail-time">{{ formatDateTime(task.occurredAt) }}</text>
+          </view>
+          <notice-banner v-if="task.privacyMode" tone="info" text="隐私模式 · 未同步任务内容" />
+          <text class="group-label">电脑与时间</text>
+          <view class="surface detail-list">
+            <view class="detail-row"><text class="detail-key">电脑</text><text class="detail-value">{{ task.desktopName }}</text></view>
+            <view class="detail-row"><text class="detail-key">完成时间</text><text class="detail-value">{{ formatDateTime(task.occurredAt) }}</text></view>
+          </view>
+          <text class="group-label">通知</text>
+          <view class="surface detail-list">
+            <view class="detail-row"><text class="detail-key">发送状态</text><text class="detail-value">{{ deliveryView(task.notificationStatus).label }}</text></view>
+            <view class="detail-row detail-row-last"><text class="detail-key">说明</text><text class="detail-value">{{ deliveryView(task.notificationStatus).detail }}</text></view>
+          </view>
+          <text v-if="!task.privacyMode" class="group-label">任务信息</text>
+          <view v-if="!task.privacyMode" class="surface detail-list">
+            <template v-if="!task.privacyMode">
+              <view v-if="task.project != null" class="detail-row"><text class="detail-key">项目</text><text class="detail-value">{{ task.project }}</text></view>
+              <view v-if="task.model != null" class="detail-row"><text class="detail-key">模型</text><text class="detail-value">{{ task.model }}</text></view>
+              <view v-if="durationLabel(task.durationMs).length > 0" class="detail-row detail-row-last"><text class="detail-key">耗时</text><text class="detail-value">{{ durationLabel(task.durationMs) }}</text></view>
+            </template>
+          </view>
+          <text class="group-label">隐私</text>
+          <text class="page-lead">{{ task.privacyMode ? '仅保存完成记录，不同步任务内容。' : '本条任务由电脑按完整模式同步。' }}</text>
+          <view v-if="!task.privacyMode && task.summary != null" class="section">
+            <text class="section-title">任务结果</text>
+            <text class="summary" :selectable="true">{{ task.summary }}</text>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { getTask } from '../../services/client.uts'
+import { ensureProtectedClientRoute } from '../../services/client-runtime.uts'
+import { deliveryView, durationLabel, formatDateTime, presentError } from '../../services/presentation.uts'
+import type { TaskRecord, UiLoadState } from '../../types/models.uts'
+
+const taskId = ref('')
+const task = ref(null as TaskRecord | null)
+const state = ref<UiLoadState>('loading')
+const errorMessage = ref('')
+
+const fallbackToTasks = (message: string) => {
+  uni.showToast({ title: message, icon: 'none' })
+  uni.reLaunch({ url: '/pages/tasks/index' })
+}
+
+const runLoad = async () => {
+  if (!/^tsk_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(taskId.value)) {
+    fallbackToTasks('任务链接无效，已返回任务列表。')
+    return
+  }
+  state.value = 'loading'
+  try {
+    task.value = await getTask(taskId.value)
+    state.value = 'ready'
+  } catch (error) {
+    const cloudError = error as UniCloudError
+    if (cloudError.errCode == 'task_not_found') {
+      task.value = null
+      errorMessage.value = '任务不存在或已删除'
+      state.value = 'error'
+      return
+    }
+    errorMessage.value = presentError(error, '任务不存在或已删除')
+    state.value = 'error'
+  }
+}
+
+const load = () => {
+  runLoad()
+}
+
+const runLoadPage = async (options: OnLoadOptions) => {
+  if (!await ensureProtectedClientRoute()) return
+  const value = options['taskId']
+  taskId.value = value == null ? '' : `${value}`
+  await runLoad()
+}
+
+onLoad((options: OnLoadOptions) => {
+  runLoadPage(options)
+})
+</script>
+
+<style lang="scss">
+.detail-head { margin-top: 14px; margin-bottom: 16px; }
+.detail-time { margin-top: 4px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.detail-row-last { border-bottom-width: 0; }
+.summary { margin-top: 8px; color: $tm-text-1; font-size: 14px; line-height: 25px; }
+</style>

@@ -18,8 +18,12 @@ const {
   readSessionUsageArchive,
   sessionUsageArchiveDate,
   sessionUsageArchivePath,
+  updateSessionUsageArchive,
   writeSessionUsageArchive
 } = archiveApi;
+const { normalizePeriod } = require('../../src/shared/usage');
+
+const { localDate } = require('../helpers/localTime');
 
 function liveSummary() {
   return {
@@ -213,9 +217,13 @@ test('captures and reapplies missing sessions for any client without double-coun
 });
 
 test('archive day and month windows expire while all-time stays available', () => {
-  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  // The month window expires on the local calendar month, and this is the one
+  // pair in the file that straddles a month edge: `2026-08-01T00:20Z` is still
+  // July locally at every negative offset, so as a `Z` literal the read lands in
+  // the same month it was captured in and the window under test never expires.
+  const archive = captureSessionUsageArchive({}, liveSummary(), localDate(2026, 7, 9, 8, 15));
   const nextMonth = applySessionUsageArchive(summaryAfterOpenCodeDelete(), archive, {
-    now: new Date('2026-08-01T00:20:00.000Z')
+    now: localDate(2026, 8, 1, 0, 20)
   });
 
   assert.equal(nextMonth.today.sessions['opencode:o1'], undefined);
@@ -333,6 +341,63 @@ test('capture does not churn timestamps when session data is unchanged', () => {
 
   assert.equal(second.sessions['opencode:o1'].capturedAt, '2026-07-09T08:15:00.000Z');
   assert.deepEqual(second, first);
+});
+
+test('canonical capture updates only changed rows in place', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const changedSummary = liveSummary();
+  changedSummary.allTime.sessions['opencode:o1'].totalTokens = 101;
+  const result = updateSessionUsageArchive(archive, changedSummary, new Date('2026-07-09T08:30:00.000Z'));
+
+  assert.equal(result.archive, archive);
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(result.archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
+});
+
+test('canonical capture safely prunes malformed entries without period windows', () => {
+  const archive = {
+    version: 1,
+    sessions: {
+      'opencode:o1': {
+        client: 'opencode',
+        sessionId: 'o1',
+        day: '2026-07-08',
+        month: '2026-06',
+        periods: {
+          today: { client: 'opencode', sessionId: 'o1', totalTokens: 10 },
+          month: { client: 'opencode', sessionId: 'o1', totalTokens: 20 },
+          allTime: { client: 'opencode', sessionId: 'o1', totalTokens: 30 }
+        }
+      }
+    }
+  };
+
+  const result = updateSessionUsageArchive(archive, null, new Date(2026, 6, 9, 8, 30));
+
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(archive.sessions['opencode:o1'].periods.today, undefined);
+  assert.equal(archive.sessions['opencode:o1'].periods.month, undefined);
+  assert.equal(archive.sessions['opencode:o1'].periods.allTime.totalTokens, 30);
+});
+
+test('canonical summary apply can reuse the caller-owned normalized record', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = {
+    allTime: normalizePeriod({
+      sessions: {
+        'codex:c1': liveSummary().today.sessions['codex:c1']
+      }
+    })
+  };
+  const visible = applySessionUsageArchive(summary, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z'),
+    canonical: true,
+    canonicalSummary: true,
+    mutate: true
+  });
+
+  assert.equal(visible, summary);
+  assert.equal(visible.allTime.sessions['opencode:o1'].archived, true);
 });
 
 test('persists archive data outside settings via injectable storage helpers', () => {

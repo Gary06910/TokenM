@@ -11,8 +11,11 @@ try {
 const {
   applyArchivedClientUsage,
   captureArchivedClientUsage,
+  normalizeArchivedClientUsage,
   pruneArchivedClientUsage
 } = archiveApi;
+
+const { localDate } = require('../helpers/localTime');
 
 function deviceRecord() {
   return {
@@ -163,11 +166,15 @@ test('archived client usage is added back while the client remains untracked', (
 });
 
 test('archived day and month usage follow calendar boundaries', () => {
-  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], new Date('2026-05-30T12:00:00.000Z'));
+  // The day and month windows are cut at local midnight, so the three clocks
+  // below are stated in local time: a `Z` noon is already the next calendar day
+  // past UTC+12, which walks the capture and both reads a day forward together
+  // and takes the month rollover with them.
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], localDate(2026, 5, 30, 12));
 
   const nextDay = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
     activeClients: 'codex',
-    now: new Date('2026-05-31T12:00:00.000Z')
+    now: localDate(2026, 5, 31, 12)
   });
   assert.equal(nextDay.today.clients.hermes, undefined);
   assert.equal(nextDay.today.models['claude-3-5-sonnet'], undefined);
@@ -181,7 +188,7 @@ test('archived day and month usage follow calendar boundaries', () => {
 
   const nextMonth = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
     activeClients: 'codex',
-    now: new Date('2026-06-01T12:00:00.000Z')
+    now: localDate(2026, 6, 1, 12)
   });
   assert.equal(nextMonth.today.clients.hermes, undefined);
   assert.equal(nextMonth.month.clients.hermes, undefined);
@@ -262,6 +269,29 @@ test('archived client usage is ignored and pruned once the client is tracked aga
 
   const pruned = pruneArchivedClientUsage(archive, 'codex,hermes');
   assert.deepEqual(pruned.clients, {});
+});
+
+test('archived Kilo Code usage migrates to the canonical Kilo client id', () => {
+  const capturedAt = new Date('2026-05-30T12:00:00.000Z');
+  const archive = captureArchivedClientUsage({}, deviceRecord(), ['hermes'], capturedAt);
+  archive.clients.kilocode = {
+    ...archive.clients.hermes,
+    client: 'kilocode'
+  };
+  delete archive.clients.hermes;
+
+  const normalized = normalizeArchivedClientUsage(archive);
+  assert.equal(normalized.clients.kilo.client, 'kilo');
+  assert.equal(normalized.clients.kilocode, undefined);
+
+  const summary = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
+    activeClients: 'codex',
+    now: new Date('2026-05-30T13:00:00.000Z')
+  });
+  assert.equal(summary.allTime.clients.kilo, 900);
+  assert.equal(summary.allTime.clients.kilocode, undefined);
+
+  assert.deepEqual(pruneArchivedClientUsage(archive, 'codex,kilo').clients, {});
 });
 
 // A progressive preview carries only the periods it has finished scanning, and

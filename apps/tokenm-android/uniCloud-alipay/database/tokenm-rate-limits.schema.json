@@ -1,0 +1,36 @@
+{
+  "bsonType": "object",
+  "description": "Explicit rate-limit scope, subject, and numeric time bucket.",
+  "required": [
+    "_id",
+    "scope",
+    "subject",
+    "bucket",
+    "count",
+    "limit",
+    "windowMs",
+    "createdAtMs",
+    "updatedAtMs",
+    "expiresAtMs"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": { "bsonType": "string", "maxLength": 64 },
+    "scope": { "bsonType": "string", "maxLength": 80 },
+    "subject": { "bsonType": "string", "maxLength": 240 },
+    "ownerId": { "description": "Nullable authenticated uid for account-scoped cleanup.", "maxLength": 240 },
+    "bucket": { "bsonType": "long" },
+    "count": { "bsonType": "int", "minimum": 1 },
+    "limit": { "bsonType": "int", "minimum": 1 },
+    "windowMs": { "bsonType": "int", "minimum": 1 },
+    "createdAtMs": { "bsonType": "long" },
+    "updatedAtMs": { "bsonType": "long" },
+    "expiresAtMs": { "bsonType": "long" }
+  }
+}

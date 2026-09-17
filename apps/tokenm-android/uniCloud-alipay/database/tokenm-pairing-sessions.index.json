@@ -1,0 +1,50 @@
+[
+  {
+    "IndexName": "code_uniqueness",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "codeUniquenessKey", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "owner_uniqueness",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerUniquenessKey", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "active_code_lookup",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "code", "Direction": "1", "Type": "varchar" },
+        { "Name": "status", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "active_owner_lookup",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "activeOwnerKey", "Direction": "1", "Type": "varchar" },
+        { "Name": "status", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "owner_created",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

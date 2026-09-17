@@ -1,0 +1,24 @@
+[
+  {
+    "IndexName": "owner_device_unique",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "deviceId", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "owner_status_push_permission",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "status", "Direction": "1", "Type": "varchar" },
+        { "Name": "pushRegistrationStatus", "Direction": "1", "Type": "varchar" },
+        { "Name": "notificationPermissionState", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

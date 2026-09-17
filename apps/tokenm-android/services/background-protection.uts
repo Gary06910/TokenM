@@ -1,0 +1,60 @@
+// Local OS reads only. Do not import client-runtime, Push or cloud services.
+// #ifdef APP-ANDROID
+import Build from 'android.os.Build'
+import PowerManager from 'android.os.PowerManager'
+import Context from 'android.content.Context'
+import Intent from 'android.content.Intent'
+import Settings from 'android.provider.Settings'
+import Uri from 'android.net.Uri'
+// #endif
+
+export const readProtectionNotificationState = (): string => {
+  try {
+    const value = uni.getAppAuthorizeSetting().notificationAuthorized
+    if (value == 'authorized' || value == 'denied') return value
+  } catch (_error) {}
+  return 'unknown'
+}
+
+export const readBatteryOptimizationState = (): string => {
+  // #ifdef APP-ANDROID
+  try {
+    if (Build.VERSION.SDK_INT < 23) return 'unsupported'
+    const activity = UTSAndroid.getUniActivity()
+    if (activity == null) return 'unknown'
+    const manager = activity.getSystemService(Context.POWER_SERVICE) as PowerManager | null
+    if (manager == null) return 'unknown'
+    return manager.isIgnoringBatteryOptimizations(activity.getPackageName()) ? 'exempt' : 'optimized'
+  } catch (_error) {}
+  // #endif
+  return 'unknown'
+}
+
+export const openProtectionNotificationSettings = (): void => {
+  uni.openAppAuthorizeSetting({
+    fail: () => { uni.showToast({ title: '请在系统设置中找到 Token M，打开允许通知。', icon: 'none' }) }
+  })
+}
+
+// Only called by explicit button clicks. Opening a screen never marks completion.
+export const openProtectionSystemSettings = (destination: string): boolean => {
+  // #ifdef APP-ANDROID
+  try {
+    const activity = UTSAndroid.getUniActivity()
+    if (activity == null) return false
+    const intent = new Intent()
+    if (destination == 'battery') {
+      if (Build.VERSION.SDK_INT < 23) return false
+      intent.setAction(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    } else if (destination == 'app') {
+      intent.setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+      intent.setData(Uri.parse('package:' + activity.getPackageName()))
+    } else if (destination == 'system') {
+      intent.setAction(Settings.ACTION_SETTINGS)
+    } else return false
+    activity.startActivity(intent)
+    return true
+  } catch (_error) {}
+  // #endif
+  return false
+}

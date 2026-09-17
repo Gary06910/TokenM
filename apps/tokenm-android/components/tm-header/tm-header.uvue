@@ -1,0 +1,84 @@
+<template>
+  <view class="header">
+    <button v-if="back" class="header-control" hover-class="header-control-active" aria-label="返回上一页" @click="goBack">返回</button>
+    <view v-else class="header-spacer"></view>
+    <text class="header-title">{{ title }}</text>
+    <button v-if="actionText.length > 0" class="header-action" @click="emitAction">{{ actionText }}</button>
+    <view v-else class="header-spacer"></view>
+  </view>
+</template>
+
+<script setup lang="uts">
+type TmHeaderProps = {
+  title?: string,
+  back?: boolean,
+  actionText?: string
+}
+
+const props = withDefaults(defineProps<TmHeaderProps>(), {
+  title: '',
+  back: false,
+  actionText: ''
+})
+
+const emit = defineEmits(['action'])
+
+const goBack = () => {
+  uni.navigateBack({
+    fail: () => {
+      uni.reLaunch({ url: '/pages/dashboard/index' })
+    }
+  })
+}
+
+const emitAction = () => {
+  emit('action')
+}
+</script>
+
+<style lang="scss">
+.header {
+  min-height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding-top: env(safe-area-inset-top);
+}
+.header-title {
+  min-width: 0;
+  flex: 1;
+  color: $tm-text-1;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+}
+.header-control, .header-spacer { width: 48px; min-width: 48px; height: 48px; }
+.header-control {
+  align-items: center;
+  justify-content: center;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  padding-left: 0;
+  border-width: 1px;
+  border-style: solid;
+  border-color: $tm-line;
+  border-radius: $tm-radius-md;
+  color: $tm-text-1;
+  background-color: $tm-surface-1;
+  font-size: 13px;
+  line-height: 46px;
+  text-align: center;
+}
+.header-control-active { opacity: 0.68; }
+.header-action {
+  min-width: 48px;
+  min-height: 48px;
+  padding-right: 4px;
+  padding-left: 4px;
+  color: $tm-info;
+  background-color: transparent;
+  font-size: 13px;
+  line-height: 48px;
+}
+</style>

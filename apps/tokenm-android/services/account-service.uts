@@ -1,0 +1,37 @@
+import { closeAccountWithUniId, logoutWithUniId } from './auth-service.uts'
+import { clearPushActivation, stopPushRuntime } from './push-runtime.uts'
+import { clearUserPageCache } from './page-cache.uts'
+
+import { clearTaskRecords } from './task-management.uts'
+
+const tokenmCo = uniCloud.importObject('tokenm-co', { customUI: true })
+const MAX_CLEANUP_PASSES = 50
+
+export type AccountDeletionResult = {
+  sessionInvalidated: boolean
+}
+
+export const clearCloudTaskHistory = async (): Promise<void> => {
+  await clearTaskRecords()
+}
+
+export const deleteAccountCompletely = async (): Promise<AccountDeletionResult> => {
+  clearUserPageCache()
+  for (let pass = 0; pass < MAX_CLEANUP_PASSES; pass += 1) {
+    const result = await tokenmCo.deleteAccount({ confirmation: 'DELETE' })
+    if (result.cleanupPending === true) continue
+
+    // Official closeAccount does not itself invalidate the current token.
+    await closeAccountWithUniId()
+    clearUserPageCache()
+    stopPushRuntime()
+    clearPushActivation()
+    try {
+      await logoutWithUniId()
+      return { sessionInvalidated: true }
+    } catch (_error) {
+      return { sessionInvalidated: false }
+    }
+  }
+  throw new Error('account cleanup remains pending')
+}

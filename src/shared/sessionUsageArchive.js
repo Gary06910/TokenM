@@ -4,37 +4,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('./usage');
-const { hasSummaryPeriod } = require('./archivePeriods');
+const {
+  cloneJson,
+  hasSummaryPeriod,
+  localDay,
+  localMonth,
+  numberValue,
+  periodFor,
+  targetPeriod,
+  toDate
+} = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
-const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
-
-function numberValue(value) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toDate(value) {
-  const date = value instanceof Date ? value : new Date(value || Date.now());
-  return Number.isNaN(date.getTime()) ? new Date() : date;
-}
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
   return Number.isNaN(collectedAt.getTime()) ? toDate(fallback) : collectedAt;
-}
-
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
-function localDay(dateValue) {
-  const date = toDate(dateValue);
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
-
-function localMonth(dateValue) {
-  const date = toDate(dateValue);
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
 }
 
 function sessionKey(client, sessionId) {
@@ -47,16 +32,8 @@ function sessionKey(client, sessionId) {
   return session ? `${session.client}:${session.sessionId}` : null;
 }
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value || {}));
-}
-
 function sameJson(left, right) {
   return isDeepStrictEqual(left || null, right || null);
-}
-
-function periodFor(record, periodName) {
-  return normalizePeriod(record?.periods?.[periodName] || record?.[periodName]);
 }
 
 function normalizedSessionFrom(value, fallbackKey) {
@@ -113,13 +90,64 @@ function normalizeSessionUsageArchive(value) {
   return normalized;
 }
 
-function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
-  const archive = normalizeSessionUsageArchive(existingArchive);
-  if (!deviceRecord || typeof deviceRecord !== 'object') return archive;
+function canonicalSessionUsageArchive(value) {
+  if (value?.version === 1 && value.sessions && typeof value.sessions === 'object') return value;
+  return normalizeSessionUsageArchive(value);
+}
 
+function pruneExpiredSessionUsagePeriods(archive, capturedAt, changedKeys) {
+  const day = localDay(capturedAt);
+  const month = localMonth(capturedAt);
+  // Collector snapshots can finish out of order across processes. A stale
+  // snapshot must never move the pruning frontier backwards.
+  const pruneDay = !archive.prunedDay || archive.prunedDay < day;
+  const pruneMonth = !archive.prunedMonth || archive.prunedMonth < month;
+  if (!pruneDay && !pruneMonth) return;
+
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    let changed = false;
+    entry.periodWindows = entry.periodWindows || {};
+    const todayWindow = entry.periodWindows?.today;
+    const retainedDay = todayWindow?.day || entry.day;
+    if (pruneDay && entry.periods?.today && (!retainedDay || retainedDay < day)) {
+      delete entry.periods.today;
+      delete entry.periodWindows.today;
+      changed = true;
+    }
+    const monthWindow = entry.periodWindows?.month;
+    const retainedMonth = monthWindow?.month || entry.month;
+    if (pruneMonth && entry.periods?.month && (!retainedMonth || retainedMonth < month)) {
+      delete entry.periods.month;
+      delete entry.periodWindows.month;
+      changed = true;
+    }
+    if (changed) changedKeys.add(key);
+  }
+  if (pruneDay) archive.prunedDay = day;
+  if (pruneMonth) archive.prunedMonth = month;
+}
+
+// The caller owns the canonical in-memory archive. Updating it in place keeps a
+// watch tick proportional to the sessions in that tick instead of cloning and
+// normalizing every retained session. Persistence receives only changed keys.
+function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date(), options = {}) {
+  const archive = canonicalSessionUsageArchive(existingArchive);
+  const changedKeys = new Set();
   const captureDate = toDate(capturedAt);
+  const captureTime = captureDate.getTime();
+  pruneExpiredSessionUsagePeriods(archive, captureDate, changedKeys);
+  if (!deviceRecord || typeof deviceRecord !== 'object') return { archive, changedKeys };
+
+  const capturedAtIso = captureDate.toISOString();
+  const day = localDay(captureDate);
+  const month = localMonth(captureDate);
   for (const periodName of PERIODS) {
-    const period = periodFor(deviceRecord, periodName);
+    if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
+    if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
+    const rawPeriod = deviceRecord?.periods?.[periodName] || deviceRecord?.[periodName];
+    const period = options.canonicalSummary === true
+      ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
+      : periodFor(deviceRecord, periodName);
     for (const session of Object.values(period.sessions || {})) {
       if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
@@ -127,44 +155,45 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
       const entry = archive.sessions[archiveKey] || {
         client: session.client,
         sessionId: session.sessionId,
-        capturedAt: captureDate.toISOString(),
-        day: localDay(captureDate),
-        month: localMonth(captureDate),
+        capturedAt: capturedAtIso,
+        day,
+        month,
         periodWindows: {},
         periods: {}
       };
-      const nextSession = clone(session);
+      const nextSession = cloneJson(session);
       const window = entry.periodWindows?.[periodName] || {};
+      const retainedCaptureTime = Date.parse(window.capturedAt || '');
+      // SQLite serializes commits, not collection time. Keep the newest event
+      // for each period when two collectors finish in the opposite order.
+      if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) continue;
       const sameWindow = periodName === 'today'
-        ? window.day === localDay(captureDate)
+        ? window.day === day
         : periodName === 'month'
-          ? window.month === localMonth(captureDate)
+          ? window.month === month
           : true;
       if (sameJson(entry.periods[periodName], nextSession) && sameWindow) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;
-      entry.capturedAt = captureDate.toISOString();
-      entry.day = localDay(captureDate);
-      entry.month = localMonth(captureDate);
+      entry.capturedAt = capturedAtIso;
+      entry.day = day;
+      entry.month = month;
       entry.periods[periodName] = nextSession;
       entry.periodWindows = entry.periodWindows || {};
-      entry.periodWindows[periodName] = { capturedAt: captureDate.toISOString() };
-      if (periodName === 'today') entry.periodWindows[periodName].day = localDay(captureDate);
-      if (periodName === 'month') entry.periodWindows[periodName].month = localMonth(captureDate);
+      entry.periodWindows[periodName] = { capturedAt: capturedAtIso };
+      if (periodName === 'today') entry.periodWindows[periodName].day = day;
+      if (periodName === 'month') entry.periodWindows[periodName].month = month;
       archive.sessions[archiveKey] = entry;
+      changedKeys.add(archiveKey);
     }
   }
 
-  return archive;
+  return { archive, changedKeys };
 }
 
-function targetPeriod(summary, periodName) {
-  if (summary.periods && typeof summary.periods === 'object') {
-    summary.periods[periodName] = normalizePeriod(summary.periods[periodName]);
-    return summary.periods[periodName];
-  }
-  summary[periodName] = normalizePeriod(summary[periodName]);
-  return summary[periodName];
+function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
+  const archive = normalizeSessionUsageArchive(existingArchive);
+  return updateSessionUsageArchive(archive, deviceRecord, capturedAt).archive;
 }
 
 function addSessionBreakdown(period, session) {
@@ -205,12 +234,12 @@ function addSessionBreakdown(period, session) {
   }
 }
 
-function addArchivedSession(period, session) {
+function addArchivedSession(period, session, archiveKey = null) {
   if (isReasonixSyntheticSession(session)) return;
-  const key = sessionKey(session.client, session.sessionId);
+  const key = archiveKey || sessionKey(session.client, session.sessionId);
   if (!key || period.sessions[key]) return;
 
-  const archived = { ...clone(session), archived: true };
+  const archived = { ...cloneJson(session), archived: true };
   period.sessions[key] = archived;
   const tokens = Math.max(0, Math.round(numberValue(archived.totalTokens)));
   const cost = numberValue(archived.costUsd);
@@ -258,9 +287,11 @@ function shouldApplyPeriod(periodName, entry, now) {
 }
 
 function applySessionUsageArchive(summary, archive, options = {}) {
-  const normalizedArchive = normalizeSessionUsageArchive(archive);
+  const normalizedArchive = options.canonical === true
+    ? canonicalSessionUsageArchive(archive)
+    : normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
-  const next = clone(summary);
+  const next = options.mutate === true ? summary : cloneJson(summary);
   const periodContainer = next.periods && typeof next.periods === 'object' ? next.periods : next;
   for (const periodName of PERIODS) {
     const period = periodContainer?.[periodName];
@@ -270,11 +301,16 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   }
   const targetPeriods = new Map();
   const targetFor = (periodName) => {
-    if (!targetPeriods.has(periodName)) targetPeriods.set(periodName, targetPeriod(next, periodName));
+    if (!targetPeriods.has(periodName)) {
+      const period = options.canonicalSummary === true
+        ? (next.periods && typeof next.periods === 'object' ? next.periods[periodName] : next[periodName])
+        : targetPeriod(next, periodName);
+      targetPeriods.set(periodName, period);
+    }
     return targetPeriods.get(periodName);
   };
 
-  for (const entry of Object.values(normalizedArchive.sessions)) {
+  for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
@@ -283,7 +319,9 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
       if (!hasSummaryPeriod(next, periodName)) continue;
-      addArchivedSession(targetFor(periodName), session);
+      const period = targetFor(periodName);
+      if (period.sessions[archiveKey]) continue;
+      addArchivedSession(period, session, archiveKey);
     }
   }
 
@@ -323,5 +361,6 @@ module.exports = {
   readSessionUsageArchive,
   sessionUsageArchiveDate,
   sessionUsageArchivePath,
+  updateSessionUsageArchive,
   writeSessionUsageArchive
 };

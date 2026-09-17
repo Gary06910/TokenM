@@ -1,0 +1,355 @@
+<template>
+  <view class="page-shell">
+    <scroll-view
+      class="page-scroll"
+      direction="vertical"
+      :show-scrollbar="false"
+      :lower-threshold="120"
+      :refresher-enabled="true"
+      :refresher-triggered="refreshing"
+      @refresherrefresh="pullRefresh"
+      @scrolltolower="loadMore"
+    >
+      <view class="page-content page-content-with-tabs">
+        <tm-header title="任务" />
+        <button class="filter-toggle" :disabled="mutation.length > 0" @click="confirmClear">{{ mutation.length > 0 ? mutation : '清除全部任务记录' }}</button>
+        <text class="filter-label">长按任务可删除记录</text>
+        <notice-banner v-if="banner.length > 0" tone="warning" :text="banner" action-text="重试" @action="refresh" />
+        <text class="filter-label">内容</text>
+        <view class="filter-row" role="tablist" aria-label="任务内容筛选">
+          <button
+            v-for="item in filters"
+            :key="item.value"
+            :class="['filter-chip', filter == item.value ? 'filter-active' : '']"
+            :aria-selected="filter == item.value"
+            @click="changeFilter(item.value)"
+          >{{ item.label }}</button>
+        </view>
+        <button class="filter-toggle" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '筛选电脑与通知' }}{{ desktopId != 'all' || deliveryFilter != 'all' ? ' · 已筛选' : '' }}</button>
+        <view v-show="showFilters">
+        <text class="filter-label">电脑</text>
+        <view class="filter-row filter-row-wrap" role="tablist" aria-label="电脑筛选">
+          <button
+            v-for="item in desktopOptions"
+            :key="item.value"
+            :class="['filter-chip', desktopId == item.value ? 'filter-active' : '']"
+            :aria-selected="desktopId == item.value"
+            @click="changeDesktop(item.value)"
+          >{{ item.label }}</button>
+        </view>
+        <text class="filter-label">通知状态</text>
+        <view class="filter-row filter-row-wrap" role="tablist" aria-label="通知状态筛选">
+          <button
+            v-for="item in deliveryFilters"
+            :key="item.value"
+            :class="['filter-chip', deliveryFilter == item.value ? 'filter-active' : '']"
+            :aria-selected="deliveryFilter == item.value"
+            @click="changeDeliveryFilter(item.value)"
+          >{{ item.label }}</button>
+        </view>
+        </view>
+        <ui-state v-if="state == 'loading'" mode="loading" variant="list" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法载入任务" :detail="errorMessage" action-text="重试" @action="refresh" />
+        <ui-state v-else-if="items.length == 0" mode="empty" :title="filter == 'all' && desktopId == 'all' && deliveryFilter == 'all' ? '暂无任务记录' : '没有符合条件的任务'" detail="完成新的 Codex 任务后，记录会显示在这里。" />
+        <view v-else class="task-list">
+          <view v-for="item in items" :key="item.taskId" class="task-row surface row-press" hover-class="row-press-active" @click="openTask(item.taskId)" @longpress="taskActions(item)">
+            <view class="task-top">
+              <text class="task-title">{{ taskTitle(item) }}</text>
+              <text class="task-complete">已完成</text>
+              
+            </view>
+            <text class="task-meta">{{ item.desktopName }} · {{ formatRelativeTime(item.occurredAt, Date.now()) }}</text>
+            <text v-if="item.privacyMode" class="privacy-caption">隐私模式 · 未同步任务内容</text>
+            <text v-if="taskPreview(item).length > 0" class="task-preview">{{ taskPreview(item) }}</text>
+            <view class="task-bottom">
+              <status-marker :tone="deliveryView(item.notificationStatus).tone" :label="deliveryView(item.notificationStatus).label" />
+            </view>
+          </view>
+          <ui-state v-if="loadingMore" mode="loading" :compact="true" variant="list" />
+          <notice-banner v-else-if="paginationError.length > 0" class="pagination-state" tone="warning" :text="paginationError" action-text="重试" @action="loadMore" />
+          <text v-else-if="nextCursor == null" class="list-footer">已显示全部任务</text>
+          <button v-else class="load-more" @click="loadMore">加载更多</button>
+        </view>
+      </view>
+    </scroll-view>
+    <tm-tab-bar selected="tasks" />
+  </view>
+</template>
+
+<script setup lang="uts">
+import { nextTick, ref } from 'vue'
+import { onReady, onShow } from '@dcloudio/uni-app'
+import { listDesktops, listTasks } from '../../services/client.uts'
+import { canReuseProtectedPageData, ensureProtectedClientRoute } from '../../services/client-runtime.uts'
+import { deliveryView, formatRelativeTime, presentError, taskPreview, taskTitle } from '../../services/presentation.uts'
+import type { TaskCursor, TaskDeliveryFilter, TaskFilter, TaskRecord, UiLoadState } from '../../types/models.uts'
+import { desktopsSnapshot, tasksSnapshot, getPageCacheSession, isPageCacheSessionCurrent } from '../../services/page-cache.uts'
+import { deleteTaskRecord, clearTaskRecords } from '../../services/task-management.uts'
+import { PageTiming } from '../../services/navigation-perf.uts'
+
+type FilterItem = { value: TaskFilter, label: string }
+type DeliveryFilterItem = { value: TaskDeliveryFilter, label: string }
+type DesktopFilterItem = { value: string, label: string }
+const filters: FilterItem[] = [
+  { value: 'all', label: '全部' },
+  { value: 'privacy', label: '隐私任务' },
+  { value: 'full', label: '完整任务' }
+]
+const deliveryFilters: DeliveryFilterItem[] = [
+  { value: 'all', label: '全部' },
+  { value: 'not_requested', label: '云端已记录' }
+]
+const allDesktopOption: DesktopFilterItem = { value: 'all', label: '全部电脑' }
+
+const mutation = ref('')
+let suppressOpenUntil = 0
+const showFilters = ref(false)
+const state = ref<UiLoadState>('loading')
+const filter = ref<TaskFilter>('all')
+const desktopId = ref('all')
+const deliveryFilter = ref<TaskDeliveryFilter>('all')
+const desktopOptions = ref<DesktopFilterItem[]>([allDesktopOption])
+const items = ref<TaskRecord[]>([])
+const nextCursor = ref(null as TaskCursor | null)
+const loadingMore = ref(false)
+const refreshing = ref(false)
+const paginationError = ref('')
+const banner = ref('')
+const errorMessage = ref('')
+const timing = new PageTiming('/pages/tasks/index')
+let requestVersion = 0
+let firstLoading = false
+let displayedSession = getPageCacheSession()
+let displayedTaskRevision = tasksSnapshot.revision
+
+const restoreCached = () => {
+  const session = getPageCacheSession()
+  if (session != displayedSession || !canReuseProtectedPageData()) {
+    items.value = []
+    nextCursor.value = null
+    desktopOptions.value = [allDesktopOption]
+    filter.value = 'all'
+    desktopId.value = 'all'
+    deliveryFilter.value = 'all'
+    state.value = 'loading'
+    displayedSession = session
+  }
+  if (displayedTaskRevision != tasksSnapshot.revision) {
+    items.value = []
+    nextCursor.value = null
+    state.value = 'loading'
+    displayedTaskRevision = tasksSnapshot.revision
+  }
+  if (filter.value != 'all' || desktopId.value != 'all' || deliveryFilter.value != 'all') return
+  const cached = canReuseProtectedPageData() ? tasksSnapshot.peek() : null
+  if (cached == null) {
+    items.value = []
+    nextCursor.value = null
+    desktopOptions.value = [allDesktopOption]
+    state.value = 'loading'
+    return
+  }
+  items.value = cached.items
+  nextCursor.value = cached.nextCursor
+  state.value = 'ready'
+  nextTick(() => { timing.cachedReady() })
+}
+restoreCached()
+
+const runLoadFirst = async (keepExisting: boolean) => {
+  const request = ++requestVersion
+  const session = getPageCacheSession()
+  const selectedFilter = filter.value
+  const taskRevision = tasksSnapshot.revision
+  const selectedDesktop = desktopId.value
+  const selectedDelivery = deliveryFilter.value
+  const previousUpdate = tasksSnapshot.updatedAt
+  firstLoading = true
+  if (!keepExisting) state.value = 'loading'
+  errorMessage.value = ''
+  try {
+    if (!await ensureProtectedClientRoute()) return
+    if (request != requestVersion || !isPageCacheSessionCurrent(session) || taskRevision != tasksSnapshot.revision) return
+    // listTasks shares the same desktop read, so the filter and name lookup
+    // never issue two requests for the same desktop snapshot.
+    const result = await listTasks(null, selectedFilter, selectedDesktop, selectedDelivery, 20)
+    const desktops = desktopsSnapshot.peek() ?? await listDesktops()
+    if (request != requestVersion || !isPageCacheSessionCurrent(session) || taskRevision != tasksSnapshot.revision) return
+    {
+      const options: DesktopFilterItem[] = [allDesktopOption]
+      desktops.forEach((item) => {
+        if (item.status == 'active') {
+          const option: DesktopFilterItem = { value: item.desktopId, label: item.name }
+          options.push(option)
+        }
+      })
+      desktopOptions.value = options
+    }
+    items.value = result.items
+    nextCursor.value = result.nextCursor
+    paginationError.value = ''
+    banner.value = ''
+    state.value = 'ready'
+    displayedTaskRevision = tasksSnapshot.revision
+    nextTick(() => {
+      if (tasksSnapshot.updatedAt > previousUpdate || selectedFilter != 'all' || selectedDesktop != 'all' || selectedDelivery != 'all') timing.freshReady()
+      else timing.cachedReady()
+    })
+  } catch (error) {
+    if (request != requestVersion || !isPageCacheSessionCurrent(session)) return
+    const shown = presentError(error, '服务暂时不可用，请稍后重试。')
+    if (keepExisting) banner.value = `更新失败，当前显示上次数据：${shown}`
+    else {
+      errorMessage.value = shown
+      state.value = 'error'
+    }
+  } finally {
+    if (request == requestVersion) firstLoading = false
+  }
+}
+
+const loadFirst = (keepExisting: boolean) => {
+  runLoadFirst(keepExisting)
+}
+
+const runLoadMore = async () => {
+  if (nextCursor.value == null || loadingMore.value || firstLoading || state.value != 'ready') return
+  const request = requestVersion
+  const session = getPageCacheSession()
+  const taskRevision = tasksSnapshot.revision
+  loadingMore.value = true
+  paginationError.value = ''
+  try {
+    const result = await listTasks(nextCursor.value, filter.value, desktopId.value, deliveryFilter.value, 20)
+    if (request != requestVersion || !isPageCacheSessionCurrent(session) || taskRevision != tasksSnapshot.revision) return
+    items.value = items.value.concat(result.items)
+    nextCursor.value = result.nextCursor
+  } catch (error) {
+    if (request != requestVersion || !isPageCacheSessionCurrent(session)) return
+    paginationError.value = presentError(error, '加载更多失败，请重试。')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+const loadMore = () => {
+  runLoadMore()
+}
+
+const changeFilter = (next: TaskFilter) => {
+  if (filter.value == next) return
+  filter.value = next
+  items.value = []
+  nextCursor.value = null
+  loadFirst(false)
+}
+
+const changeDesktop = (next: string) => {
+  if (desktopId.value == next) return
+  desktopId.value = next
+  items.value = []
+  nextCursor.value = null
+  loadFirst(false)
+}
+
+const changeDeliveryFilter = (next: TaskDeliveryFilter) => {
+  if (deliveryFilter.value == next) return
+  deliveryFilter.value = next
+  items.value = []
+  nextCursor.value = null
+  loadFirst(false)
+}
+
+const refresh = () => {
+  if (firstLoading) return
+  tasksSnapshot.expire()
+  desktopsSnapshot.expire()
+  loadFirst(state.value == 'ready')
+}
+
+const runPullRefresh = async () => {
+  if (refreshing.value || firstLoading) return
+  refreshing.value = true
+  tasksSnapshot.expire()
+  desktopsSnapshot.expire()
+  try {
+    await runLoadFirst(state.value == 'ready')
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const pullRefresh = () => {
+  runPullRefresh()
+}
+const runDelete = async (task: TaskRecord | null): Promise<void> => {
+  if (mutation.value.length > 0) return
+  mutation.value = task == null ? '正在清除…' : '正在删除…'
+  const session = getPageCacheSession()
+  try {
+    if (task == null) await clearTaskRecords()
+    else await deleteTaskRecord(task)
+    if (!isPageCacheSessionCurrent(session)) return
+    requestVersion += 1
+    firstLoading = false
+    loadingMore.value = false
+    items.value = task == null ? [] : items.value.filter((item) => item.taskId != task.taskId)
+    if (task == null) {
+      nextCursor.value = null
+      filter.value = 'all'
+      desktopId.value = 'all'
+      deliveryFilter.value = 'all'
+    }
+    displayedTaskRevision = tasksSnapshot.revision
+    state.value = 'ready'
+    banner.value = ''
+    paginationError.value = ''
+    uni.showToast({ title: task == null ? '已清除全部任务记录' : '已删除任务记录', icon: 'none' })
+  } catch (_error) {
+    if (isPageCacheSessionCurrent(session)) uni.showToast({ title: task == null ? '清除失败，请重试' : '删除失败，请重试', icon: 'none' })
+  } finally { mutation.value = '' }
+}
+const confirmClear = (): void => {
+  if (mutation.value.length > 0) return
+  uni.showModal({ title: '清除全部任务记录？', content: '这将清除当前账户中的全部任务记录，不受当前筛选条件影响。此操作不可撤销。', cancelText: '取消', confirmText: '清除全部', success: (result) => { if (result.confirm) runDelete(null) } })
+}
+const taskActions = (task: TaskRecord): void => {
+  if (mutation.value.length > 0) return
+  suppressOpenUntil = Date.now() + 1000
+  uni.showActionSheet({ itemList: ['删除此任务记录'], success: (action) => {
+    if (action.tapIndex != 0) return
+    uni.showModal({ title: '删除这条任务记录？', content: '删除后将不再出现在 Token M 的任务列表中。', cancelText: '取消', confirmText: '删除', success: (result) => { if (result.confirm) runDelete(task) } })
+  } })
+}
+const openTask = (taskId: string) => {
+  if (mutation.value.length > 0 || Date.now() < suppressOpenUntil) return
+  uni.navigateTo({ url: `/pages/task-detail/index?taskId=${encodeURIComponent(taskId)}` })
+}
+onShow(() => {
+  restoreCached()
+  loadFirst(state.value == 'ready')
+})
+onReady(() => { timing.shellReady() })
+</script>
+
+<style lang="scss">
+.filter-label { margin-top: 10px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.filter-row { flex-direction: row; flex-wrap: wrap; margin-top: 4px; margin-bottom: 2px; }
+.filter-row-wrap { flex-wrap: wrap; }
+.filter-chip { min-width: 72px; max-width: 280px; min-height: 48px; margin-right: 6px; margin-bottom: 4px; padding-right: 12px; padding-left: 12px; border-width: 1px; border-style: solid; border-color: $tm-line; border-radius: $tm-radius-md; color: $tm-text-2; background-color: transparent; font-size: 13px; line-height: 46px; }
+.filter-active { border-color: $tm-accent; color: $tm-text-1; background-color: $tm-accent-soft; }
+.task-list { margin-top: 4px; }
+.task-row { margin-top: 12px; padding: 16px; }
+.task-top, .task-bottom { flex-direction: row; align-items: center; justify-content: space-between; }
+.task-title { min-width: 0; flex: 1; color: $tm-text-1; font-size: $tm-type-card; font-weight: 600; line-height: 24px; }
+.task-time { margin-left: 10px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.task-preview { margin-top: 5px; color: $tm-text-2; font-size: 13px; line-height: 20px; }
+.task-bottom { margin-top: 7px; }
+.task-desktop { margin-left: 10px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.pagination-state { margin-top: 12px; }
+.list-footer { min-height: 48px; color: $tm-text-3; font-size: 12px; line-height: 48px; text-align: center; }
+.load-more { width: 100%; min-height: 48px; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; }
+.filter-toggle { min-height: 48px; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; }
+.task-complete { margin-left: 8px; color: $tm-text-2; font-size: 12px; line-height: 18px; }
+.task-meta { margin-top: 8px; color: $tm-text-2; font-size: 12px; line-height: 20px; }
+</style>

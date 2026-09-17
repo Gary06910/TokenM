@@ -3,23 +3,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
-const { num, sumTokens } = require('./history');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
+const { sharedDataDir, writeJsonAtomic } = require('./config');
+const {
+  normalizeTokscaleClientName, num, sumOutputTokens, sumTokens
+} = require('./history');
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function observationKey(value) {
   return JSON.stringify([
-    String(value?.client || 'unknown'),
+    normalizeTokscaleClientName(value?.client) || 'unknown',
     String(value?.modelId || value?.model || value?.model_id || 'unknown')
   ]);
 }
 
 function normalizeObservation(value) {
   if (!value || typeof value !== 'object') return null;
-  const client = String(value.client || 'unknown');
+  const client = normalizeTokscaleClientName(value.client) || 'unknown';
   const modelId = String(value.modelId || value.model || value.model_id || 'unknown');
   const tokens = Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
@@ -67,6 +68,24 @@ function normalizeObservation(value) {
     } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {})
   };
+}
+
+function addObservation(previous, candidate) {
+  if (!previous) return candidate;
+  return normalizeObservation({
+    ...candidate,
+    providerId: candidate.providerId || previous.providerId,
+    tokens: previous.tokens + candidate.tokens,
+    cost: previous.cost + candidate.cost,
+    messages: previous.messages + candidate.messages,
+    reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
+    tokenComponentsAvailable: previous.tokenComponentsAvailable === true
+      && candidate.tokenComponentsAvailable === true,
+    cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
+    cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
+    outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
+    unclassifiedTokens: num(previous.unclassifiedTokens) + num(candidate.unclassifiedTokens)
+  });
 }
 
 function normalizeComponentValues(value, totalTokens, exact) {
@@ -140,7 +159,8 @@ function normalizeDay(value, fallbackDate = '') {
   for (const raw of source) {
     const observation = normalizeObservation(raw);
     if (!observation) continue;
-    observations[observationKey(observation)] = observation;
+    const key = observationKey(observation);
+    observations[key] = addObservation(observations[key], observation);
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
   const componentSummary = normalizeComponentSummary(value?.componentSummary, observations);
@@ -182,39 +202,20 @@ function observationsFromGraphs(graphs) {
       const day = days.get(date) || { date, activeTimeMs: 0, observations: {} };
       day.activeTimeMs += Math.max(0, Math.round(num(row.activeTimeMs ?? row.active_time_ms)));
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
+        const client = normalizeTokscaleClientName(raw?.client) || 'unknown';
         const candidate = normalizeObservation({
           ...raw,
-          tokens: sumTokens(raw?.tokens, raw?.client),
+          client,
+          tokens: sumTokens(raw?.tokens, client),
           reasoningTokens: raw?.tokens?.reasoning,
           tokenComponentsAvailable: raw?.tokenComponentsAvailable !== false,
           cacheReadTokens: raw?.tokens?.cacheRead ?? raw?.tokens?.cache_read,
           cacheWriteTokens: raw?.tokens?.cacheWrite ?? raw?.tokens?.cache_write,
-          outputTokens: num(raw?.tokens?.output)
-            + (String(raw?.client || '').trim().toLowerCase() === REASONIX_CLIENT
-              ? num(raw?.tokens?.reasoning)
-              : 0)
+          outputTokens: sumOutputTokens(raw?.tokens, client)
         });
         if (!candidate) continue;
         const key = observationKey(candidate);
-        const previous = day.observations[key];
-        if (!previous) {
-          day.observations[key] = candidate;
-          continue;
-        }
-        day.observations[key] = normalizeObservation({
-          ...candidate,
-          providerId: candidate.providerId || previous.providerId,
-          tokens: previous.tokens + candidate.tokens,
-          cost: previous.cost + candidate.cost,
-          messages: previous.messages + candidate.messages,
-          reasoningTokens: num(previous.reasoningTokens) + num(candidate.reasoningTokens),
-          tokenComponentsAvailable: previous.tokenComponentsAvailable === true
-            && candidate.tokenComponentsAvailable === true,
-          cacheReadTokens: num(previous.cacheReadTokens) + num(candidate.cacheReadTokens),
-          cacheWriteTokens: num(previous.cacheWriteTokens) + num(candidate.cacheWriteTokens),
-          outputTokens: num(previous.outputTokens) + num(candidate.outputTokens),
-          unclassifiedTokens: num(previous.unclassifiedTokens) + num(candidate.unclassifiedTokens)
-        });
+        day.observations[key] = addObservation(day.observations[key], candidate);
       }
       days.set(date, day);
     }
@@ -530,9 +531,45 @@ function dailyHistoryArchivePath(options = {}) {
   return options.path || path.join(sharedDataDir(options), 'daily-history-archive.json');
 }
 
+function validateDailyHistoryArchiveDocument(value, filePath) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Could not parse JSON in ${filePath}: archive root must be an object`);
+  }
+  for (const key of ['days', 'liveDays']) {
+    if (Object.prototype.hasOwnProperty.call(value, key)
+      && (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key]))) {
+      throw new Error(`Could not parse JSON in ${filePath}: ${key} must be an object`);
+    }
+  }
+  return value;
+}
+
 function readDailyHistoryArchive(options = {}) {
-  const read = options.readJson || readJson;
-  return normalizeDailyHistoryArchive(read(dailyHistoryArchivePath(options), {}));
+  const filePath = dailyHistoryArchivePath(options);
+  if (typeof options.readJson === 'function') {
+    return normalizeDailyHistoryArchive(
+      validateDailyHistoryArchiveDocument(options.readJson(filePath, {}), filePath)
+    );
+  }
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return normalizeDailyHistoryArchive({});
+    throw error;
+  }
+  if (!content.trim()) {
+    throw new Error(`Could not parse JSON in ${filePath}: archive is empty`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    const parseError = new Error(`Could not parse JSON in ${filePath}: ${error.message}`);
+    parseError.cause = error;
+    throw parseError;
+  }
+  return normalizeDailyHistoryArchive(validateDailyHistoryArchiveDocument(parsed, filePath));
 }
 
 function writeDailyHistoryArchive(archive, options = {}) {

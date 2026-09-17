@@ -60,10 +60,10 @@ When both a widget and the headless agent run on the same machine, the widget's 
 
 Configuration has two sources, and the widget splits its persisted GUI state by sensitivity:
 
-1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as compatibility changes and keep `.env.example` aligned with the code.
+1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as externally visible contract changes and keep `.env.example` aligned with the code.
 2. **Widget GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from env), while the main process sends a default-deny redacted view to the renderer. The only explicit renderer exceptions are the two Hub secrets required by the existing sync UI. The headless agent and standalone hub never read `credentials.json`; their credential flow remains CLI/env-based.
 
-`CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. Expose any raw credential to the renderer only through an explicit allowlist. Legacy migration must write and verify the new store before stripping/deleting the old source; corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
+`CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. Expose any raw credential to the renderer only through an explicit allowlist. If a one-time credential-store conversion is required to preserve current user data while removing an old store, write and verify the new store before deleting the old source, then remove the deprecated runtime path rather than retaining both implementations. Corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
 
 Per-setting precedence for the agent and hub: `CLI flag → env var (real or .env) → built-in default`. There is no JSON config file anymore — `config.local.json` was removed.
 
@@ -71,20 +71,20 @@ Per-setting precedence for the agent and hub: `CLI flag → env var (real or .en
 
 The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` (`src/electron/main.js` and `src/agent/agent.js` both derive from it). But adding a *new* client means touching several spots that must all agree on the id:
 
-| Touch point | Where |
-|---|---|
-| Default client list | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` |
-| Source roots | the `add(...)` call in `clientSourceRoots()` (`src/shared/collector.js`) — one `[checkId, dir]`, or `[checkId, watchDir, sourcePath]` when tokscale reads one exact file. `clientWatchCandidates()` is only a projection of this table; nothing is declared there |
-| Source check ids | every `checkId` above must be in `CLIENT_SOURCE_CHECK_IDS` (`src/shared/clientHealth.js`), kept alphabetical, then `npm run sync:worker` for the Worker copy. An id missing from that allowlist makes `normalizeClientHealth` drop the client's whole `checks` array, not just the unknown entry |
+| Touch point          | Where                                                        |
+| -------------------- | ------------------------------------------------------------ |
+| Default client list  | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js`          |
+| Source roots         | the `add(...)` call in `clientSourceRoots()` (`src/shared/collector.js`) — one `[checkId, dir]`, or `[checkId, watchDir, sourcePath]` when tokscale reads one exact file. `clientWatchCandidates()` is only a projection of this table; nothing is declared there |
+| Source check ids     | every `checkId` above must be in `CLIENT_SOURCE_CHECK_IDS` (`src/shared/clientHealth.js`), kept alphabetical, then `npm run sync:worker` for the Worker copy. An id missing from that allowlist makes `normalizeClientHealth` drop the client's whole `checks` array, not just the unknown entry |
 | XDG vs home-relative | mirror tokscale, do not guess: a root is XDG-derived only if `clients.rs` declares it `PathRoot::XdgData` or `scanner.rs` resolves it through the `dirs` crate. Those `dirs` lookups are invisible to `strings` on the binary and to `tokscale clients`, so read the Rust at the version tag (`tmp/tokscale`). Roots spelled as home-relative literals upstream must stay home-relative here |
-| Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
-| Renderer maps | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
-| Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
-| Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
-| Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` |
-| WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
-| Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
-| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
+| Name normalization   | the `normalizeClientName()` branch in `src/shared/usage.js`  |
+| Renderer maps        | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
+| Discord RPC          | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
+| Row icon CSS         | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
+| Icon assets          | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` |
+| WSL discovery        | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
+| Docs & env examples  | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
+| Guard tests          | the expected-client lists in `tests/shared/clientTracking.test.js` |
 
 One caveat on top of the table:
 
@@ -110,8 +110,17 @@ A device is "stale" if `Date.now() - receivedAt > staleAfterMs` (default 10 min)
 
 ## Conventions
 
+### Design and implementation principles
+
+- **Research proven solutions before designing a new one.** Before designing a solution, first study how mature products and established ecosystems solve the same class of problem. Prefer validated patterns, conventions, and defaults over inventing a bespoke architecture from scratch.
+- **Backward compatibility is not a design goal.** Deprecated code paths should be removed rather than preserved through compatibility shims, fallback mechanisms, or migration schemes. Settings keys, env vars, CLI flags, hub endpoints, and the wire shape (`docs/API.md`) are externally visible change surfaces: when intentionally changing or removing them, make the break explicit and update the affected code, tests, and documentation together instead of carrying the old path forward.
+- **Prefer the simplest implementation that fully satisfies the current requirements.** Avoid abstractions, configuration options, indirection, extension points, and generalized machinery that are not justified by a concrete current need.
+- **Build incrementally in end-to-end layers.** First complete the smallest version that works end to end, then add capabilities on top of a stable, usable product. Do not replace an already working product with immature complexity.
+- **Keep components modular with clear responsibilities and separation of concerns.** Each component should have a well-defined role and boundary; avoid mixing unrelated policy, transport, persistence, UI, or provider-specific behavior.
+- **Prefer mature, well-maintained libraries when they reduce overall complexity or improve reliability.** Do not reimplement common functionality unless there is a clear project-specific reason to do so.
+- **Evaluate existing dependencies before hand-rolling functionality or adding a new dependency.** Read the relevant documentation, API surface, and type definitions first; do not assume an existing library lacks a needed capability without verifying it.
+- **Design architecture for long-term evolution, not disposable shortcuts.** Choose solutions that can remain part of the intended architecture as the product grows; avoid expedients that solve only the immediate problem and are already expected to be replaced later.
 - **Consider best practices first.** When picking an approach — library vs hand-roll, pattern vs custom, framework default vs override — start by checking the ecosystem convention, not by optimizing for "fewer deps" or "less code". If a hand-rolled solution is genuinely better, argue that *after* weighing the convention.
-- **This project has external users.** Settings keys, env vars, CLI flags, hub endpoints, and the wire shape (`docs/API.md`) are compatibility surfaces — treat changes to them as breaking and think about migration. Internal code can still be refactored and renamed freely.
 - **Don't add dependencies or new tooling without discussing it first** (in the issue or PR description).
 - **Keep this file lean and current.** Document non-obvious constraints and gotchas, not descriptions the code already makes obvious. Avoid hardcoded counts and exhaustive lists (prefer a command like `ls src/shared/` over a hand-maintained one); verify claims against the code before writing them; delete anything that has gone stale — an outdated note is worse than none.
 

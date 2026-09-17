@@ -1,0 +1,361 @@
+import {
+  createOfficialCaptcha,
+  getCurrentAccountProfile,
+  loginWithUniId,
+  logoutWithUniId,
+  refreshOfficialCaptcha,
+  registerWithUniId
+} from './auth-service.uts'
+import { acceptRequiredPrivacyConsent, getCurrentPrivacyConsent } from './privacy-consent.uts'
+import { clearUserPageCache, getPageCacheSession, isPageCacheSessionCurrent, handleProtectedReadError } from './page-cache.uts'
+import { disableCurrentMobileDevice, registerCurrentMobileDevice } from './mobile-device.uts'
+import {
+  clearPushActivation,
+  flushPendingPushRoute,
+  isPushReconfirmationRequired,
+  markPushNavigationReady,
+  rememberPushActivation,
+  requestAndroidNotificationPermission,
+  requirePushReconfirmation,
+  startPushRuntime,
+  stopPushRuntime,
+  wasPushActivatedByUser
+} from './push-runtime.uts'
+import type {
+  AccountProfile,
+  CaptchaChallenge,
+  NotificationPermissionState,
+  PushReadiness,
+  RuntimeFacts
+} from '../types/models.uts'
+
+let facts: RuntimeFacts = {
+  login: 'checking',
+  privacyConsent: 'checking',
+  notificationPermission: 'notDetermined',
+  mobileRegistration: 'notStarted',
+  pushReadiness: 'permission_required',
+  recoveryCode: null
+}
+let bootstrapInFlight: Promise<RuntimeFacts> | null = null
+let bootstrapSession = -1
+let factsOwner = ''
+let lastConsentCurrent = false
+
+const copyFacts = (): RuntimeFacts => ({ ...facts })
+
+const notificationPermission = (): NotificationPermissionState => {
+  const value = uni.getAppAuthorizeSetting().notificationAuthorized
+  if (value == 'authorized') return 'authorized'
+  if (value == 'denied') return 'denied'
+  return 'notDetermined'
+}
+
+const derivePushReadiness = (): PushReadiness => {
+  if (facts.notificationPermission != 'authorized') return 'permission_required'
+  if (facts.mobileRegistration == 'error') return 'registration_error'
+  if (facts.mobileRegistration != 'ready') return 'registration_required'
+  return 'ready'
+}
+
+const updateReadiness = () => {
+  facts.pushReadiness = derivePushReadiness()
+}
+
+const cloudErrorCode = (error: any | null): string => {
+  if (!(error instanceof UniCloudError)) return ''
+  const value = error as UniCloudError
+  const rawCode = value.errCode
+  return rawCode == null ? '' : `${rawCode}`
+}
+
+const refreshConsentFact = async (): Promise<void> => {
+  const session = getPageCacheSession()
+  const account = getCurrentAccountProfile()
+  const consent = await getCurrentPrivacyConsent()
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  factsOwner = account.userId
+  lastConsentCurrent = consent.isCurrent
+  facts.privacyConsent = consent.isCurrent ? 'current' : 'required'
+}
+
+export const getRuntimeFacts = (): RuntimeFacts => copyFacts()
+
+export const settledRuntimeFacts = (): Promise<RuntimeFacts> => {
+  const pending = bootstrapInFlight
+  return pending == null ? Promise.resolve(copyFacts()) : pending
+}
+
+// Historical data may render immediately; every new protected read still checks
+// consent remotely, and tokenm-co continues to verify the token and ownership.
+export const canReuseProtectedPageData = (): boolean => {
+  const account = getCurrentAccountProfile()
+  return account.authenticated && account.userId == factsOwner && lastConsentCurrent
+}
+
+export const prepareClientPage = async (): Promise<RuntimeFacts> => {
+  const session = getPageCacheSession()
+  const account = getCurrentAccountProfile()
+  facts.login = account.authenticated ? 'signedIn' : 'signedOut'
+  facts.notificationPermission = notificationPermission()
+  if (!account.authenticated) {
+    clearUserPageCache()
+    lastConsentCurrent = false
+    facts.privacyConsent = 'required'
+    stopPushRuntime()
+    updateReadiness()
+    return copyFacts()
+  }
+  try {
+    await refreshConsentFact()
+    facts.recoveryCode = null
+  } catch (error) {
+    if (isPageCacheSessionCurrent(session)) {
+      stopPushRuntime()
+      facts.privacyConsent = 'error'
+      facts.recoveryCode = 'consent_status_unavailable'
+      if (handleProtectedReadError(error)) lastConsentCurrent = false
+    }
+    throw error
+  }
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  if (facts.privacyConsent != 'current') {
+    clearUserPageCache()
+    stopPushRuntime()
+    // Preserve the existing consent-revocation/device-disable recovery path,
+    // without waiting for Push teardown before displaying the consent page.
+    bootstrapClientRuntime().catch((_error) => {})
+  }
+  updateReadiness()
+  return copyFacts()
+}
+
+export const ensureProtectedClientRoute = async (): Promise<boolean> => {
+  const current = await prepareClientPage()
+  if (current.login != 'signedIn') {
+    uni.reLaunch({ url: '/pages/login/index' })
+    return false
+  }
+  if (current.privacyConsent != 'current') {
+    uni.reLaunch({ url: '/pages/permission/index' })
+    return false
+  }
+  return true
+}
+
+export const refreshMobileRegistration = async (): Promise<RuntimeFacts> => {
+  const session = getPageCacheSession()
+  if (
+    facts.login != 'signedIn'
+    || facts.privacyConsent != 'current'
+    || !wasPushActivatedByUser()
+    || isPushReconfirmationRequired()
+  ) {
+    stopPushRuntime()
+    facts.mobileRegistration = 'notStarted'
+    updateReadiness()
+    return copyFacts()
+  }
+  facts.mobileRegistration = 'registering'
+  updateReadiness()
+  try {
+    await registerCurrentMobileDevice(facts.notificationPermission)
+    if (!isPageCacheSessionCurrent(session)) return copyFacts()
+    facts.mobileRegistration = 'ready'
+    facts.recoveryCode = null
+  } catch (error) {
+    if (!isPageCacheSessionCurrent(session)) return copyFacts()
+    if (cloudErrorCode(error) == 'privacy_consent_required') {
+      lastConsentCurrent = false
+      clearUserPageCache()
+      stopPushRuntime()
+      facts.privacyConsent = 'required'
+      facts.mobileRegistration = 'notStarted'
+      facts.recoveryCode = 'privacy_consent_required'
+    } else {
+      facts.mobileRegistration = 'error'
+      facts.recoveryCode = 'mobile_registration_failed'
+    }
+  }
+  updateReadiness()
+  return copyFacts()
+}
+
+const startEligiblePushRuntime = async (): Promise<void> => {
+  const signedIn = facts.login == 'signedIn'
+  const hasCurrentConsent = facts.privacyConsent == 'current'
+  if (signedIn && hasCurrentConsent && wasPushActivatedByUser() && !isPushReconfirmationRequired()) {
+    startPushRuntime()
+    await refreshMobileRegistration()
+  } else {
+    stopPushRuntime()
+  }
+}
+
+const runBootstrapClientRuntime = async (): Promise<RuntimeFacts> => {
+  const session = getPageCacheSession()
+  facts.notificationPermission = notificationPermission()
+  facts.recoveryCode = null
+  const account = getCurrentAccountProfile()
+  facts.login = account.authenticated ? 'signedIn' : 'signedOut'
+  if (!account.authenticated) {
+    lastConsentCurrent = false
+    clearUserPageCache()
+    facts.privacyConsent = 'required'
+    facts.mobileRegistration = 'notStarted'
+    stopPushRuntime()
+    updateReadiness()
+    return copyFacts()
+  }
+  facts.privacyConsent = 'checking'
+  try {
+    await refreshConsentFact()
+    if (!isPageCacheSessionCurrent(session)) return copyFacts()
+    if (facts.privacyConsent != 'current' && wasPushActivatedByUser()) {
+      stopPushRuntime()
+      requirePushReconfirmation()
+      try {
+        await disableCurrentMobileDevice(facts.notificationPermission, facts.mobileRegistration)
+        if (!isPageCacheSessionCurrent(session)) return copyFacts()
+        facts.mobileRegistration = 'disabled'
+      } catch (_disableError) {
+        if (!isPageCacheSessionCurrent(session)) return copyFacts()
+        facts.mobileRegistration = 'error'
+      }
+      facts.recoveryCode = 'privacy_consent_required'
+    }
+    await startEligiblePushRuntime()
+  } catch (_error) {
+    if (!isPageCacheSessionCurrent(session)) return copyFacts()
+    stopPushRuntime()
+    facts.privacyConsent = 'error'
+    facts.mobileRegistration = 'notStarted'
+    facts.recoveryCode = 'consent_status_unavailable'
+  }
+  updateReadiness()
+  flushPendingNotificationRoute()
+  return copyFacts()
+}
+
+export const bootstrapClientRuntime = (): Promise<RuntimeFacts> => {
+  const session = getPageCacheSession()
+  if (bootstrapSession != session) bootstrapInFlight = null
+  if (bootstrapInFlight != null) return bootstrapInFlight!
+  const task = runBootstrapClientRuntime()
+  bootstrapInFlight = task
+  bootstrapSession = session
+  task.then(
+    () => { if (bootstrapInFlight == task) bootstrapInFlight = null },
+    () => { if (bootstrapInFlight == task) bootstrapInFlight = null }
+  )
+  return task
+}
+
+export const loginWithUsername = async (
+  username: string,
+  password: string,
+  captcha: string
+): Promise<AccountProfile> => {
+  clearUserPageCache()
+  lastConsentCurrent = false
+  const account = await loginWithUniId(username, password, captcha)
+  facts.login = account.authenticated ? 'signedIn' : 'error'
+  facts.notificationPermission = notificationPermission()
+  try {
+    await refreshConsentFact()
+    facts.recoveryCode = null
+  } catch (_error) {
+    facts.privacyConsent = 'error'
+    facts.recoveryCode = 'consent_status_unavailable'
+  }
+  facts.mobileRegistration = 'notStarted'
+  updateReadiness()
+  return account
+}
+
+export const registerWithUsername = async (
+  username: string,
+  password: string,
+  captcha: string
+): Promise<AccountProfile> => {
+  clearUserPageCache()
+  lastConsentCurrent = false
+  const account = await registerWithUniId(username, password, captcha)
+  facts.login = account.authenticated ? 'signedIn' : 'error'
+  facts.notificationPermission = notificationPermission()
+  try {
+    await refreshConsentFact()
+    facts.recoveryCode = null
+  } catch (_error) {
+    facts.privacyConsent = 'error'
+    facts.recoveryCode = 'consent_status_unavailable'
+  }
+  facts.mobileRegistration = 'notStarted'
+  updateReadiness()
+  return account
+}
+
+export const createCaptcha = (scene: string): Promise<CaptchaChallenge> => createOfficialCaptcha(scene)
+export const refreshCaptcha = (scene: string): Promise<CaptchaChallenge> => refreshOfficialCaptcha(scene)
+
+export const acceptCurrentPrivacyConsent = async (): Promise<RuntimeFacts> => {
+  if (facts.login != 'signedIn') throw new Error('login required')
+  const session = getPageCacheSession()
+  const consent = await acceptRequiredPrivacyConsent()
+  if (!isPageCacheSessionCurrent(session)) throw new Error('page_session_changed')
+  factsOwner = getCurrentAccountProfile().userId
+  lastConsentCurrent = consent.isCurrent
+  facts.privacyConsent = consent.isCurrent ? 'current' : 'required'
+  facts.recoveryCode = null
+  updateReadiness()
+  return copyFacts()
+}
+
+export const requestNotificationPermissionFromCta = async (): Promise<RuntimeFacts> => {
+  if (facts.login != 'signedIn' || facts.privacyConsent != 'current') {
+    throw new Error('current login and privacy consent required')
+  }
+  facts.notificationPermission = notificationPermission()
+  rememberPushActivation()
+  if (facts.notificationPermission == 'denied') {
+    uni.openAppAuthorizeSetting({})
+    updateReadiness()
+    return copyFacts()
+  }
+  await requestAndroidNotificationPermission()
+  facts.notificationPermission = notificationPermission()
+  if (facts.notificationPermission != 'authorized') {
+    updateReadiness()
+    return copyFacts()
+  }
+  startPushRuntime()
+  return await refreshMobileRegistration()
+}
+
+export const logoutClient = async (): Promise<boolean> => {
+  clearUserPageCache()
+  lastConsentCurrent = false
+  stopPushRuntime()
+  let businessDeviceDisabled = true
+  try {
+    await disableCurrentMobileDevice(facts.notificationPermission, facts.mobileRegistration)
+    facts.mobileRegistration = 'disabled'
+  } catch (_error) {
+    businessDeviceDisabled = false
+    facts.mobileRegistration = 'error'
+  }
+  await logoutWithUniId()
+  clearUserPageCache()
+  clearPushActivation()
+  facts.login = 'signedOut'
+  facts.privacyConsent = 'required'
+  facts.recoveryCode = businessDeviceDisabled ? null : 'device_disable_failed'
+  updateReadiness()
+  return businessDeviceDisabled
+}
+
+export const markClientNavigationReady = () => markPushNavigationReady()
+
+export const flushPendingNotificationRoute = () => {
+  if (facts.login == 'signedIn' && facts.privacyConsent == 'current') flushPendingPushRoute()
+}

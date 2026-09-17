@@ -85,13 +85,17 @@ function composeReleaseNotes(template, generatedNotes, { repository = '', direct
   return template.replace(GENERATED_NOTES_MARKER, notes);
 }
 
-function fullChangelogRange(template) {
-  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/Javis603\/token-monitor\/compare\/([^"\s]+)">([^<]+)<\/a><\/summary>$/gm)];
+function fullChangelogRange(template, expectedRepository = '') {
+  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/compare\/([^"\s]+)">([^<]+)<\/a><\/summary>$/gm)];
   if (matches.length !== 1) {
     throw new Error(`expected exactly one versioned Full Changelog link, found ${matches.length}`);
   }
-  const hrefRange = matches[0][1];
-  const linkText = matches[0][2];
+  const repository = matches[0][1];
+  if (expectedRepository && repository !== expectedRepository) {
+    throw new Error(`Full Changelog repository ${repository} does not match ${expectedRepository}`);
+  }
+  const hrefRange = matches[0][2];
+  const linkText = matches[0][3];
   const tags = hrefRange.split('...');
   if (tags.length !== 2 || tags.some((tag) => !tag.startsWith('v') || tag.length === 1)) {
     throw new Error(`invalid Full Changelog range: ${hrefRange}`);
@@ -236,7 +240,7 @@ async function main() {
   }
 
   const template = await fs.readFile(templatePath, 'utf8');
-  const { previousTag, currentTag } = fullChangelogRange(template);
+  const { previousTag, currentTag } = fullChangelogRange(template, process.env.GITHUB_REPOSITORY);
   if (currentTag !== process.env.GITHUB_REF_NAME) {
     throw new Error(`Full Changelog ends at ${currentTag}, expected ${process.env.GITHUB_REF_NAME}`);
   }

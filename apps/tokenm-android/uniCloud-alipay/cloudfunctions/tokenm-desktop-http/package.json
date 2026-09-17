@@ -1,0 +1,18 @@
+{
+  "name": "tokenm-desktop-http",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "type": "commonjs",
+  "cloudfunction-config": {
+    "runtime": "Nodejs18",
+    "timeout": 10,
+    "path": "/tokenm-desktop-http"
+  },
+  "dependencies": {
+    "tokenm-core": "file:../common/tokenm-core"
+  },
+  "extensions": {
+    "uni-cloud-push": {}
+  }
+}

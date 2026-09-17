@@ -99,6 +99,18 @@ test('fullChangelogRange locks generated notes to the curated compare range', ()
   assert.throws(() => fullChangelogRange('missing'), /found 0/);
 });
 
+test('fullChangelogRange accepts the Token M release repository and can enforce ownership', () => {
+  const template = '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Gary06910/TokenM/compare/v0.56.0...v0.57.0">v0.56.0...v0.57.0</a></summary>';
+  assert.deepEqual(fullChangelogRange(template, 'Gary06910/TokenM'), {
+    previousTag: 'v0.56.0',
+    currentTag: 'v0.57.0'
+  });
+  assert.throws(
+    () => fullChangelogRange(template, 'Javis603/token-monitor'),
+    /does not match Javis603\/token-monitor/
+  );
+});
+
 test('fetchGeneratedNotes requests GitHub generated notes for the pushed tag', async () => {
   let request;
   const body = await fetchGeneratedNotes({

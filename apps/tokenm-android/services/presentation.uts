@@ -1,0 +1,183 @@
+import type {
+  ClientRegistrationState,
+  DeliveryStatus,
+  DesktopRecord,
+  LoginFact,
+  MobileRegistrationFact,
+  NotificationPermissionState,
+  PrivacyConsentFact,
+  PushReadiness,
+  StatusView,
+  TaskRecord,
+  Tone
+} from '../types/models.uts'
+
+const pad = (value: number): string => value < 10 ? `0${value}` : `${value}`
+
+export const formatDateTime = (value: string | null): string => {
+  if (value == null || value.length == 0) return '时间未知'
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return '时间未知'
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+export const formatRelativeTime = (value: string | null, now: number): string => {
+  if (value == null || value.length == 0) return '时间未知'
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return '时间未知'
+  const delta = Math.max(0, now - timestamp)
+  if (delta < 60000) return '刚刚'
+  if (delta < 3600000) return `${Math.floor(delta / 60000)} 分钟前`
+  if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小时前`
+  return formatDateTime(value)
+}
+
+export const deliveryView = (status: DeliveryStatus): StatusView => {
+  switch (status) {
+    case 'not_requested': return { label: '未发送通知', detail: '本条任务仅保存了完成记录', tone: 'info' }
+    case 'submitted': return { label: '通知已发送', detail: '推送服务已接受发送请求', tone: 'success' }
+    case 'skipped_disabled': return { label: '未发送通知', detail: '任务通知已关闭，完成记录仍会保存', tone: 'neutral' }
+    case 'skipped_no_target': return { label: '未发送通知', detail: '请在通知设置中连接手机通知服务', tone: 'warning' }
+    case 'failed': return { label: '通知发送失败', detail: '任务记录不受影响', tone: 'danger' }
+    case 'unknown': return { label: '发送结果无法确认', detail: '本次推送结果无法确认；任务记录已保存', tone: 'warning' }
+    case 'sending': return { label: '正在发送', detail: '本次发送请求已开始', tone: 'info' }
+    default: return { label: '等待处理', detail: '发送尚未开始', tone: 'info' }
+  }
+}
+
+export const permissionView = (state: NotificationPermissionState): StatusView => {
+  if (state == 'authorized') return { label: '系统通知已开启', detail: 'Token M 可以显示任务提醒', tone: 'success' }
+  if (state == 'denied') return { label: '系统通知未开启', detail: '需要在系统设置中恢复', tone: 'danger' }
+  return { label: '尚未开启系统通知', detail: '你可以在了解用途后选择开启', tone: 'warning' }
+}
+
+export const registrationView = (state: ClientRegistrationState): StatusView => {
+  if (state == 'ready') return { label: '通知服务已连接', detail: '此设备已关联通知服务', tone: 'success' }
+  if (state == 'error') return { label: '通知服务需要恢复', detail: '请在通知设置中重试', tone: 'danger' }
+  return { label: '通知服务未连接', detail: '完成隐私确认后可连接', tone: 'warning' }
+}
+
+export const loginFactView = (state: LoginFact): StatusView => {
+  if (state == 'signedIn') return { label: '账户已登录', detail: '当前会话可访问 Token M 云端数据', tone: 'success' }
+  if (state == 'signedOut') return { label: '账户未登录', detail: '登录后才会连接通知服务', tone: 'warning' }
+  if (state == 'error') return { label: '会话状态异常', detail: '请重新登录并确认本地会话', tone: 'danger' }
+  return { label: '正在确认登录状态', detail: '请稍候', tone: 'info' }
+}
+
+export const consentFactView = (state: PrivacyConsentFact): StatusView => {
+  if (state == 'current') return { label: '隐私说明已确认', detail: '可继续设置任务通知', tone: 'success' }
+  if (state == 'required') return { label: '需要隐私确认', detail: '阅读并确认后可继续', tone: 'warning' }
+  if (state == 'error') return { label: '无法核对隐私版本', detail: '通知服务保持停止，请稍后重试', tone: 'danger' }
+  return { label: '正在核对隐私版本', detail: '请稍候', tone: 'info' }
+}
+
+export const mobileRegistrationFactView = (state: MobileRegistrationFact): StatusView => {
+  if (state == 'ready') return { label: '通知服务已连接', detail: '此手机可以接收任务提醒', tone: 'success' }
+  if (state == 'registering') return { label: '正在连接通知服务', detail: '请稍候', tone: 'info' }
+  if (state == 'error') return { label: '通知服务连接失败', detail: '可在登录、隐私和权限状态正常后重试', tone: 'danger' }
+  if (state == 'disabled') return { label: '设备已停用', detail: '退出登录后不再作为通知目标', tone: 'neutral' }
+  return { label: '通知服务尚未连接', detail: '开启通知后可连接', tone: 'warning' }
+}
+
+export const pushReadinessView = (state: PushReadiness): StatusView => {
+  if (state == 'ready') return { label: '通知服务已就绪', detail: '此手机已具备接收通知的条件', tone: 'success' }
+  if (state == 'registration_error') return { label: '通知服务需要恢复', detail: '请在通知设置中重新连接', tone: 'danger' }
+  if (state == 'registration_required') return { label: '通知服务尚未连接', detail: '请在通知设置中完成连接', tone: 'warning' }
+  return { label: '需要系统通知权限', detail: '在系统设置中允许任务提醒', tone: 'warning' }
+}
+
+export const desktopStatusView = (desktop: DesktopRecord): StatusView => {
+  if (desktop.status == 'revoked') return { label: '已解绑', detail: '不会再上报任务', tone: 'neutral' }
+  if (desktop.lastSeenAt == null) return { label: '等待连接', detail: '尚未在线', tone: 'warning' }
+  return { label: '已连接', detail: `最后在线 ${formatRelativeTime(desktop.lastSeenAt, Date.now())}`, tone: 'success' }
+}
+
+export const taskTitle = (task: TaskRecord): string => {
+  if (task.privacyMode) return '隐私任务'
+  return task.project == null || task.project.length == 0 ? 'Codex 任务' : task.project
+}
+
+export const taskPreview = (task: TaskRecord): string => {
+  if (task.privacyMode || task.summary == null) return ''
+  return task.summary.length > 72 ? `${task.summary.slice(0, 72)}…` : task.summary
+}
+
+export const durationLabel = (durationMs: number | null): string => {
+  if (durationMs == null || durationMs < 0) return ''
+  return `${Math.max(1, Math.round(durationMs / 1000))} 秒`
+}
+
+export const sanitizeTask = (task: TaskRecord): TaskRecord => {
+  if (!task.privacyMode) return { ...task }
+  return {
+    ...task,
+    project: null,
+    model: null,
+    summary: null,
+    durationMs: null
+  }
+}
+
+export const cloudErrorCode = (error: any | null): string => {
+  if (!(error instanceof UniCloudError)) return ''
+  const value = error as UniCloudError
+  const rawErrCode = value.errCode
+  if (rawErrCode != null && `${rawErrCode}`.length > 0) return `${rawErrCode}`
+  const rawCode = value.code
+  return rawCode == null ? '' : `${rawCode}`
+}
+
+export const presentErrorCode = (code: string, fallback: string): string => {
+  if (code == 'rate_limited') return '操作过于频繁，请稍后重试。'
+  if (code == 'task_not_found') return '任务不存在或已被清除。'
+  if (code == 'pairing_invalid') return '配对码已失效，请生成新的配对码。'
+  if (code == 'desktop_revoked') return '这台电脑已解绑，不能继续执行该操作。'
+  if (code == 'privacy_consent_required') return '隐私说明已更新，请重新确认后继续。'
+  if (code == 'configuration_required') return '云端配置尚未完成。'
+  if (
+    code == 'unauthenticated'
+    || code == 'uni-id-token-expired'
+    || code == 'uni-id-check-token-failed'
+  ) return '登录已失效，请重新登录。'
+  if (code == 'uni-id-account-exists') return '用户名已存在，请直接登录或更换用户名。'
+  if (code == 'uni-id-invalid-username') return '用户名仅支持字母、数字、下划线和短横线，且不能为纯数字。'
+  if (code == 'uni-id-invalid-password-medium') return '密码需为 8–16 位，并至少包含字母、数字、特殊符号中的两类。'
+  if (code == 'uni-id-invalid-password-weak') return '密码需为 6–16 位，并同时包含字母和数字。'
+  if (code == 'uni-id-invalid-password-strong') return '密码需为 8–16 位，并同时包含字母、数字和特殊符号。'
+  if (code == 'uni-id-invalid-password-super') return '密码需为 8–16 位，并同时包含大小写字母、数字和特殊符号。'
+  if (code == 'uni-id-invalid-password') return '密码不符合安全要求，请重新设置。'
+  if (code == 'uni-id-invalid-param' || code == 'uni-id-param-required') return '注册信息不完整或格式错误，请检查后重试。'
+  if (code == 'uni-id-captcha-required') return '请输入图形验证码。'
+  if (code == 'uni-captcha-text-required') return '请输入图形验证码。'
+  if (code == 'uni-captcha-deviceId-required') return '验证码会话已失效，请刷新后重试。'
+  if (code == 'uni-captcha-verify-fail') return '验证码错误，请重新输入。'
+  if (code == 'uni-captcha-verify-overdue') return '验证码已失效，请刷新后重试。'
+  if (code == 'uni-id-system-error' || code == 'uni-captcha-interior-fail') return '注册服务暂时不可用，请稍后重试。'
+  if (
+    code == 'NETWORK_ERROR'
+    || code == 'uni-cloud-network-error'
+    || code == 'uni-cloud-request-fail'
+    || code == 'uni-cloud-request-timeout'
+  ) return '网络连接失败，请检查网络后重试。'
+  return fallback
+}
+
+export const presentError = (error: any | null, fallback: string): string => {
+  if (!(error instanceof UniCloudError)) return fallback
+  const code = cloudErrorCode(error)
+  const mapped = presentErrorCode(code, '')
+  if (mapped.length > 0) return mapped
+  const value = error as UniCloudError
+  const rawMessage = (value.errMsg ?? '').toLowerCase()
+  if (
+    rawMessage.includes('network')
+    || rawMessage.includes('timeout')
+    || rawMessage.includes('request:fail')
+    || rawMessage.includes('网络')
+    || rawMessage.includes('超时')
+  ) return '网络连接失败，请检查网络后重试。'
+  return fallback
+}
+
+export const toneClass = (tone: Tone): string => `tone-${tone}`

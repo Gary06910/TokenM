@@ -1,0 +1,33 @@
+// Installation-local UX only: USER_CONFIRMED, never Push eligibility.
+export type BackgroundGuideBrand = 'honor' | 'xiaomi'
+export type ProtectionConfirmations = { guideConfirmed: boolean }
+const BRAND_KEY = 'tokenm.background-protection.brand.v1'
+const HONOR_KEY = 'tokenm.background-protection.honor-guide-user-confirmed.v2'
+const XIAOMI_KEY = 'tokenm.background-protection.xiaomi-guide-user-confirmed.v1'
+export const readProtectionBrand = (): BackgroundGuideBrand => uni.getStorageSync(BRAND_KEY) === 'xiaomi' ? 'xiaomi' : 'honor'
+export const writeProtectionBrand = (brand: BackgroundGuideBrand): void => { uni.setStorageSync(BRAND_KEY, brand) }
+export const readProtectionConfirmations = (): ProtectionConfirmations => ({
+  guideConfirmed: uni.getStorageSync(readProtectionBrand() == 'honor' ? HONOR_KEY : XIAOMI_KEY) === true
+})
+export const writeProtectionConfirmation = (brand: BackgroundGuideBrand, completed: boolean): void => {
+  uni.setStorageSync(brand == 'honor' ? HONOR_KEY : XIAOMI_KEY, completed)
+}
+export const protectionSummary = (notification: string, battery: string, confirmations: ProtectionConfirmations): string => {
+  if (notification != 'authorized' || (battery != 'exempt' && battery != 'unsupported')) return '建议配置'
+  return confirmations.guideConfirmed ? '已完成基本设置' : '建议配置'
+}
+
+export const notificationProtectionLabel = (state: string): string => {
+  if (state == 'authorized') return '系统检测：已开启'
+  if (state == 'denied') return '系统检测：未开启'
+  return '系统状态未确认，请检查'
+}
+
+export const batteryProtectionLabel = (state: string): string => {
+  if (state == 'exempt') return '系统检测：已忽略电池优化'
+  if (state == 'optimized') return '系统检测：尚未忽略电池优化'
+  if (state == 'unsupported') return '当前 Android 版本无此标准优化项'
+  return '系统状态未确认，请检查'
+}
+
+export const manualProtectionLabel = (confirmed: boolean): string => confirmed ? '已手动确认（未自动检测）' : '请确认（无法自动检测）'

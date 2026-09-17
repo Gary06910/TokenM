@@ -5,17 +5,18 @@ const { formatCurrencyFromUsd, normalizeCurrency } = require('../shared/currency
 const compactTokens = require('../shared/compactTokens');
 
 const CLIENT_ID = '1507034330436862062';
-const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
+const GITHUB_URL = 'https://github.com/Gary06910/TokenM';
 const KNOWN_CLIENT_ASSETS = new Set([
-  'claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
-  'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'reasonix'
+  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
+  'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
+  'gemini'
 ]);
 const CLIENT_LABELS = {
-  claude: 'Claude', codex: 'Codex', hermes: 'Hermes Agent',
-  gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
-  antigravity: 'Antigravity', cline: 'Cline',
-  kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
-  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix'
+  claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', hermes: 'Hermes Agent',
+  openclaw: 'OpenClaw', cursor: 'Cursor', antigravity: 'Antigravity', cline: 'Cline',
+  amp: 'Amp', droid: 'Factory Droid', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
+  pi: 'Pi', zed: 'Zed', kilo: 'Kilo', commandcode: 'Command Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', unsloth: 'Unsloth',
+  gemini: 'Gemini'
 };
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;

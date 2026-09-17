@@ -1,0 +1,97 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="Token M" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="dashboard" />
+        <ui-state
+          v-else-if="state == 'error'"
+          mode="error"
+          title="无法准备开始页面"
+          :detail="errorMessage"
+          action-text="重试"
+          @action="load"
+        />
+        <view v-else class="onboarding-body">
+          <text class="brand">Token M</text>
+          <text class="onboarding-title">Codex 完成时，让手机告诉你。</text>
+          <text class="onboarding-copy">绑定 Token M Desktop 后，任务记录会保存在你的账户；开启系统通知后，再在手机上显示完成提醒。</text>
+          <button class="btn btn-primary" hover-class="btn-primary-active" @click="goLogin">登录</button>
+          <button class="btn btn-secondary btn-spaced" hover-class="btn-active" @click="goRegister">创建账户</button>
+          <button class="quiet-action" @click="goPermission">先了解任务通知</button>
+          <button class="privacy-link" @click="goPrivacy">默认使用隐私模式 · 了解详情</button>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onLoad, onReady } from '@dcloudio/uni-app'
+import {
+  bootstrapClientRuntime,
+  flushPendingNotificationRoute,
+  markClientNavigationReady
+} from '../../services/client-runtime.uts'
+import { presentError } from '../../services/presentation.uts'
+import type { UiLoadState } from '../../types/models.uts'
+
+const state = ref<UiLoadState>('loading')
+const errorMessage = ref('')
+
+const runLoad = async () => {
+  state.value = 'loading'
+  errorMessage.value = ''
+  try {
+    const facts = await bootstrapClientRuntime()
+    if (facts.login == 'signedIn' && facts.privacyConsent == 'current') {
+      uni.reLaunch({ url: '/pages/dashboard/index' })
+      return
+    }
+    if (facts.login == 'signedIn') {
+      uni.reLaunch({ url: '/pages/permission/index' })
+      return
+    }
+    state.value = 'ready'
+  } catch (error) {
+    errorMessage.value = presentError(error, '服务暂时不可用，请稍后重试。')
+    state.value = 'error'
+  }
+}
+
+const load = () => {
+  runLoad()
+}
+
+const goLogin = () => {
+  uni.navigateTo({ url: '/pages/login/index' })
+}
+const goRegister = () => {
+  uni.navigateTo({ url: '/pages/register/index' })
+}
+const goPermission = () => {
+  uni.navigateTo({ url: '/pages/permission/index' })
+}
+const goPrivacy = () => {
+  uni.navigateTo({ url: '/pages/privacy/index' })
+}
+
+onLoad((_options: OnLoadOptions) => {
+  load()
+})
+onReady(() => {
+  markClientNavigationReady()
+  flushPendingNotificationRoute()
+})
+</script>
+
+<style lang="scss">
+.onboarding-body { padding-top: 48px; padding-bottom: 40px; }
+.brand { margin-bottom: 8px; color: $tm-info; font-size: 13px; font-weight: 600; line-height: 19px; }
+.onboarding-title { max-width: 310px; color: $tm-text-1; font-size: 26px; font-weight: 700; line-height: 31px; }
+.onboarding-copy { max-width: 310px; margin-top: 14px; margin-bottom: 20px; color: $tm-text-2; font-size: 14px; line-height: 23px; }
+.quiet-action, .privacy-link { width: 100%; min-height: 48px; background-color: transparent; font-size: 13px; line-height: 48px; text-align: center; }
+.quiet-action { margin-top: 6px; color: $tm-info; }
+.privacy-link { color: $tm-text-3; }
+</style>

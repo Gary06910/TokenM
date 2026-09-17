@@ -1,0 +1,121 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="数据与隐私" :back="true" />
+        <notice-banner v-if="message.length > 0" :tone="messageTone" :text="message" />
+        <view class="section">
+          <text class="section-title">隐私模式</text>
+          <text class="privacy-copy">仅上传完成事件、电脑标识、匿名会话标识和时间；不上传 prompt、完整对话、工作目录、源代码或 Codex 最终回复。</text>
+        </view>
+        <view class="section">
+          <text class="section-title">完整模式</text>
+          <text class="privacy-copy">可上传项目名称、模型、耗时和受长度限制的任务结果摘要；仍不上传完整聊天记录或源代码。请只在你接受这些内容进入云端时开启。</text>
+        </view>
+        <view class="section surface detail-list">
+          <view class="detail-row"><text class="detail-key">保存内容</text><text class="detail-value">账户、电脑、完成记录与通知状态</text></view>
+          <view class="detail-row"><text class="detail-key">用途</text><text class="detail-value">展示任务记录、绑定电脑并发送你主动开启的通知</text></view>
+          <view class="detail-row"><text class="detail-key">存储</text><text class="detail-value">与你的 Token M 账户关联的云端服务</text></view>
+          <view class="detail-row detail-row-last"><text class="detail-key">管理</text><text class="detail-value">你可以清除任务记录或删除账户；配对码仅在显示的有效期内使用</text></view>
+        </view>
+        <view class="section danger-zone">
+          <text class="section-title">管理数据</text>
+          <notice-banner v-if="!authenticated" class="danger-action" tone="info" text="登录后可以清除任务记录或删除账户。" />
+          <button v-if="!authenticated" class="btn btn-primary btn-spaced" hover-class="btn-primary-active" @click="goLogin">前往登录</button>
+          <template v-else>
+            <button :class="['btn', 'btn-danger', 'danger-action', working ? 'btn-disabled' : '']" hover-class="btn-active" :disabled="working" @click="confirmClear">清除任务记录</button>
+            <button :class="['btn', 'btn-danger', 'btn-spaced', working ? 'btn-disabled' : '']" hover-class="btn-active" :disabled="working" @click="confirmDelete">删除账户</button>
+          </template>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { clearCloudTaskHistory, deleteAccountCompletely } from '../../services/account-service.uts'
+import { getCurrentAccountProfile } from '../../services/auth-service.uts'
+import { presentError } from '../../services/presentation.uts'
+
+const working = ref(false)
+const authenticated = ref(false)
+const message = ref('')
+const messageTone = ref('info')
+const goLogin = () => {
+  uni.reLaunch({ url: '/pages/login/index' })
+}
+
+const runClear = async () => {
+  working.value = true
+  try {
+    await clearCloudTaskHistory()
+    message.value = '任务记录已清除。'
+    messageTone.value = 'success'
+  } catch (error) {
+    message.value = presentError(error, '服务暂时不可用，请稍后重试。')
+    messageTone.value = 'danger'
+  } finally {
+    working.value = false
+  }
+}
+
+const confirmClear = () => {
+  if (working.value) return
+  uni.showModal({
+    title: '清除全部任务记录？',
+    content: '这将清除当前账户中的全部任务记录。此操作不可撤销。',
+    cancelText: '取消',
+    confirmText: '清除全部',
+    confirmColor: '#c24152',
+    success: (result) => {
+      if (!result.confirm) return
+      runClear()
+    }
+  })
+}
+
+const runDelete = async () => {
+  working.value = true
+  try {
+    const result = await deleteAccountCompletely()
+    if (result.sessionInvalidated) {
+      uni.reLaunch({ url: '/pages/onboarding/index' })
+    } else {
+      message.value = '账户已注销，但官方 logout 未能确认本地 token 失效。请保持应用关闭并联系支持处理。'
+      messageTone.value = 'danger'
+      working.value = false
+    }
+  } catch (error) {
+    message.value = presentError(error, '服务暂时不可用，请稍后重试。')
+    messageTone.value = 'danger'
+    working.value = false
+  }
+}
+
+const confirmDelete = () => {
+  if (working.value) return
+  uni.showModal({
+    title: '删除 Token M 账户',
+    content: '这会先清理 Token M 业务数据，再注销官方账户。操作开始后无法恢复。',
+    confirmText: '删除账户',
+    confirmColor: '#c24152',
+    success: (result) => {
+      if (!result.confirm) return
+      runDelete()
+    }
+  })
+}
+
+onShow(() => {
+  authenticated.value = getCurrentAccountProfile().authenticated
+})
+</script>
+
+<style lang="scss">
+.privacy-copy { margin-top: 6px; color: $tm-text-2; font-size: 14px; line-height: 25px; }
+.detail-row-last { border-bottom-width: 0; }
+.danger-action { margin-top: 10px; }
+.danger-zone { padding-top: 16px; border-top-width: 1px; border-top-style: solid; border-top-color: $tm-line; }
+</style>

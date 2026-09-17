@@ -1,0 +1,56 @@
+[
+  {
+    "IndexName": "desktop_event_unique",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "desktopId", "Direction": "1", "Type": "varchar" },
+        { "Name": "eventId", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "owner_created_id",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" },
+        { "Name": "_id", "Direction": "-1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "owner_desktop_created",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "desktopId", "Direction": "1", "Type": "varchar" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "owner_status_created",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "notificationStatus", "Direction": "1", "Type": "varchar" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "owner_privacy_created",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "privacyMode", "Direction": "1", "Type": "bool" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

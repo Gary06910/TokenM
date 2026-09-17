@@ -1,0 +1,24 @@
+const usernameDigitsOnly = new RegExp("^\\d+$")
+const usernameAllowed = new RegExp("^[a-zA-Z0-9_-]+$")
+const passwordMedium = /^(?![0-9]+$)(?![a-zA-Z]+$)(?![~!@#$%^&*_\-+=`|\\(){}[\]:;"'<>,.?/]+$)[0-9a-zA-Z~!@#$%^&*_\-+=`|\\(){}[\]:;"'<>,.?/]{8,16}$/
+
+export const registrationUsernameError = (value: string): string => {
+  const username = value.trim()
+  if (username.length < 3) return '用户名至少需要 3 个字符。'
+  if (usernameDigitsOnly.test(username)) return '用户名不能为纯数字。'
+  if (!usernameAllowed.test(username)) return '用户名仅支持字母、数字、下划线和短横线。'
+  return ''
+}
+
+export const registrationPasswordError = (value: string): string => {
+  if (passwordMedium.test(value)) return ''
+  return '密码需为 8–16 位，并至少包含字母、数字、特殊符号中的两类。'
+}
+
+export const registrationCaptchaShouldReload = (code: string): boolean => {
+  return code == 'uni-id-account-exists'
+    || code == 'uni-captcha-verify-fail'
+    || code == 'uni-captcha-verify-overdue'
+    || code == 'uni-captcha-deviceId-required'
+    || code == 'uni-id-system-error'
+}

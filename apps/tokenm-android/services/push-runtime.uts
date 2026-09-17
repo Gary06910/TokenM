@@ -1,0 +1,155 @@
+import { expireTaskViews } from './page-cache.uts'
+
+const PUSH_ACTIVATED_KEY = 'tokenm.push.user-activated.v1'
+const PUSH_RECONFIRM_KEY = 'tokenm.push.reconfirm-consent.v1'
+const PENDING_PUSH_ROUTE_KEY = 'tokenm.push.pending-task.v1'
+const TASKS_FALLBACK = '__tasks__'
+const TASK_NOTIFICATION_CHANNEL_ID = 'DcloudChannelID'
+
+let listenerRegistered = false
+let navigationReady = false
+
+export const isAllowedTaskId = (taskId: string | null): boolean => {
+  if (taskId == null) return false
+  return /^tsk_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(taskId)
+}
+
+const fallbackToTasks = () => {
+  uni.reLaunch({ url: '/pages/tasks/index' })
+}
+
+const openPendingRoute = () => {
+  if (!navigationReady) return
+  const stored = uni.getStorageSync(PENDING_PUSH_ROUTE_KEY)
+  if (typeof stored != 'string' || stored.length == 0) return
+  uni.removeStorageSync(PENDING_PUSH_ROUTE_KEY)
+  if (stored == TASKS_FALLBACK || !isAllowedTaskId(stored)) {
+    fallbackToTasks()
+    return
+  }
+  uni.navigateTo({
+    url: `/pages/task-detail/index?taskId=${encodeURIComponent(stored)}`,
+    fail: () => {
+      fallbackToTasks()
+    }
+  })
+}
+
+const taskIdFromPushData = (data: UTSJSONObject): string | null => {
+  let message = data.getJSON('payload')
+  if (message == null) {
+    const serialized = data.getString('payload')
+    if (serialized != null && serialized.length <= 800) {
+      try {
+        message = JSON.parseObject(serialized)
+      } catch (_error) {
+        message = null
+      }
+    }
+  }
+  if (message == null) message = data
+  return message.getString('taskId')
+}
+
+const pushMessageListener = (result: OnPushMessageCallbackResult) => {
+  // A newly delivered event expires only task-derived views; no network work.
+  expireTaskViews()
+  if (result.type != 'click') return
+  const taskId = taskIdFromPushData(result.data)
+  uni.setStorageSync(PENDING_PUSH_ROUTE_KEY, isAllowedTaskId(taskId) ? taskId! : TASKS_FALLBACK)
+  openPendingRoute()
+}
+
+export const wasPushActivatedByUser = (): boolean => uni.getStorageSync(PUSH_ACTIVATED_KEY) === true
+export const isPushReconfirmationRequired = (): boolean => uni.getStorageSync(PUSH_RECONFIRM_KEY) === true
+
+export const rememberPushActivation = () => {
+  uni.setStorageSync(PUSH_ACTIVATED_KEY, true)
+  uni.removeStorageSync(PUSH_RECONFIRM_KEY)
+}
+
+export const requirePushReconfirmation = () => {
+  uni.setStorageSync(PUSH_RECONFIRM_KEY, true)
+}
+
+export const clearPushActivation = () => {
+  uni.removeStorageSync(PUSH_ACTIVATED_KEY)
+  uni.removeStorageSync(PUSH_RECONFIRM_KEY)
+  uni.removeStorageSync(PENDING_PUSH_ROUTE_KEY)
+}
+
+export const ensureTaskNotificationChannel = () => {
+  // #ifdef APP-ANDROID
+  const manager = uni.getPushChannelManager()
+  if (manager == null) return
+  manager.setPushChannel({
+    channelId: TASK_NOTIFICATION_CHANNEL_ID,
+    channelDesc: 'Token M 任务完成提醒',
+    enableVibration: true,
+    importance: 3,
+    lockscreenVisibility: 1
+  } as SetPushChannelOptions)
+  // #endif
+}
+
+export const requestAndroidNotificationPermission = (): Promise<void> => {
+  // #ifdef APP-ANDROID
+  return new Promise<void>((resolve, reject) => {
+    const activity = UTSAndroid.getUniActivity()
+    if (activity == null) {
+      reject(new Error('Android activity unavailable'))
+      return
+    }
+    const permissions = ['android.permission.POST_NOTIFICATIONS']
+    if (UTSAndroid.checkSystemPermissionGranted(activity, permissions)) {
+      resolve()
+      return
+    }
+    UTSAndroid.requestSystemPermission(
+      activity,
+      permissions,
+      (_allRight: boolean, _grantedList: string[]) => {
+        resolve()
+      },
+      (_doNotAskAgain: boolean, _grantedList: string[]) => {
+        resolve()
+      },
+      false
+    )
+  })
+  // #endif
+  // #ifndef APP-ANDROID
+  return Promise.resolve()
+  // #endif
+}
+
+export const startPushRuntime = () => {
+  if (listenerRegistered) return
+  ensureTaskNotificationChannel()
+  uni.onPushMessage(pushMessageListener)
+  listenerRegistered = true
+}
+
+export const stopPushRuntime = () => {
+  if (!listenerRegistered) return
+  uni.offPushMessage(pushMessageListener)
+  listenerRegistered = false
+}
+
+export const getOfficialPushClientId = (): Promise<string> => new Promise<string>((resolve, reject) => {
+  uni.getPushClientId({
+    success: (result: GetPushClientIdSuccess) => {
+      resolve(result.cid)
+    },
+    fail: (error: GetPushClientIdFail) => {
+      reject(error)
+    }
+  })
+})
+
+export const markPushNavigationReady = () => {
+  navigationReady = true
+  openPendingRoute()
+}
+
+export const flushPendingPushRoute = () => openPendingRoute()

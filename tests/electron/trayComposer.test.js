@@ -11,12 +11,76 @@ const {
   costDisplayPatch,
   createTrayComposer,
   duplicateTrayLayoutItem,
+  floatingBubbleBitmapHeight,
   handlePickerDocumentScroll,
   moveTrayLayoutItemByKey,
   periodItemPatch,
   syncTrayComposerSurfaces,
-  usageScopePatch
+  usageScopePatch,
+  watchDeviceScaleChanges
 } = require('../../src/electron/renderer/trayComposer');
+
+test('floating bubble bitmap height tracks CSS pixels at the current device scale', () => {
+  assert.equal(floatingBubbleBitmapHeight(1), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.25), 30);
+  assert.equal(floatingBubbleBitmapHeight(1.5), 36);
+  assert.equal(floatingBubbleBitmapHeight(2), 48);
+  assert.equal(floatingBubbleBitmapHeight(2.5), 60);
+  assert.equal(floatingBubbleBitmapHeight(0), 24);
+  assert.equal(floatingBubbleBitmapHeight('invalid'), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.5, 20), 30);
+});
+
+test('device scale watcher rearms its resolution query and notifies on DPR changes', () => {
+  const queries = [];
+  let ratio = 1.5;
+  let notifications = 0;
+  const matchMedia = (media) => {
+    const listeners = new Set();
+    const query = {
+      media,
+      addEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.add(listener);
+      },
+      removeEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.delete(listener);
+      },
+      dispatchChange() {
+        for (const listener of [...listeners]) listener({ matches: false, media });
+      },
+      listenerCount() {
+        return listeners.size;
+      }
+    };
+    queries.push(query);
+    return query;
+  };
+
+  const stop = watchDeviceScaleChanges({
+    matchMedia,
+    getDevicePixelRatio: () => ratio,
+    onChange: () => { notifications += 1; }
+  });
+
+  assert.equal(queries[0].media, '(resolution: 1.5dppx)');
+  assert.equal(queries[0].listenerCount(), 1);
+  assert.equal(notifications, 0);
+
+  ratio = 1;
+  queries[0].dispatchChange();
+  assert.equal(queries[0].listenerCount(), 0);
+  assert.equal(queries[1].media, '(resolution: 1dppx)');
+  assert.equal(queries[1].listenerCount(), 1);
+  assert.equal(notifications, 1);
+
+  stop();
+  assert.equal(queries[1].listenerCount(), 0);
+  queries[1].dispatchChange();
+  assert.equal(queries.length, 2);
+  assert.equal(notifications, 1);
+});
 
 function layoutWithIds(...ids) {
   return {
@@ -249,14 +313,16 @@ const balanceStats = {
   }
 };
 
-function balanceSource() {
-  return {
+function balanceSource(creditsDisplay = '') {
+  const source = {
     provider: 'deepseek',
     accountMode: 'lowest',
     accountKey: '',
     window: 'primary',
     valueMode: 'remaining'
   };
+  if (creditsDisplay) source.creditsDisplay = creditsDisplay;
+  return source;
 }
 
 test('a balance-only provider is offered in the tray window picker', () => {
@@ -274,6 +340,46 @@ test('a tray percent item prints a balance as compact money', () => {
 
   assert.equal(resolved.items[0].available, true);
   assert.equal(resolved.items[0].text, '¥4.00');
+});
+
+test('balance percentage opt-in applies consistently to text and stacked items', () => {
+  const statsWithReset = structuredClone(balanceStats);
+  statsWithReset.limits.providers[0].windows[0].resetsAt = '2026-07-23T09:00:00.000Z';
+  const percentSource = balanceSource('percent');
+  const doublePercent = trayLayoutApi.createTrayLayoutItem('doublePercent', { idFactory: () => 'double' });
+  doublePercent.rows = [balanceSource(), percentSource];
+  const doubleInfo = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'info' });
+  doubleInfo.rows = [
+    { ...percentSource, metric: 'percent' },
+    { ...percentSource, metric: 'percentReset' }
+  ];
+
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [
+      { id: 'percent', type: 'text', metric: 'percent', source: percentSource },
+      { id: 'percent-reset', type: 'text', metric: 'percentReset', source: percentSource },
+      doublePercent,
+      doubleInfo
+    ]
+  }, statsWithReset, { nowMs: Date.parse('2026-07-23T08:00:00.000Z') });
+
+  assert.equal(resolved.items[0].text, '40%');
+  assert.equal(resolved.items[1].text, '40% · 1h 00m');
+  assert.deepEqual(resolved.items[2].rows.map((row) => row.text), ['¥4.00', '40%']);
+  assert.deepEqual(resolved.items[3].rows.map((row) => row.text), ['40%', '40% · 1h 00m']);
+});
+
+test('tray layouts persist only the explicit balance percentage opt-in', () => {
+  const percent = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'percent', type: 'text', metric: 'percent', source: balanceSource('percent') }]
+  });
+  const invalid = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'invalid', type: 'text', metric: 'percent', source: balanceSource('ratio') }]
+  });
+
+  assert.equal(percent.items[0].source.creditsDisplay, 'percent');
+  assert.equal('creditsDisplay' in invalid.items[0].source, false);
 });
 
 test('a tray bar item meters a balance against its derived percentage', () => {

@@ -45,6 +45,39 @@ test('WSL SQLite recovery guidance is localized without English fallback', () =>
   }
 });
 
+test('Unlimited remains a provider quota value token in every locale', () => {
+  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
+    assert.equal(MESSAGES[locale]['settings.thirdparty.unlimited'], 'Unlimited', locale);
+  }
+});
+
+test('Sub2API browser-session steps and optional renewal exist in every locale', () => {
+  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
+    const guidance = [
+      MESSAGES[locale]['settings.thirdparty.hintSub2Api'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiStep1'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiStep2'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiStep3'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiStep4'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiCredentialRejected'],
+      MESSAGES[locale]['settings.thirdparty.missingSub2ApiToken'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiAccessTokenPlaceholder'],
+      MESSAGES[locale]['settings.thirdparty.sub2ApiRefreshTokenPlaceholder']
+    ].join('\n');
+    assert.match(guidance, /auth_token/, locale);
+    assert.match(guidance, /refresh_token/, locale);
+  }
+  assert.match(MESSAGES.en['settings.thirdparty.sub2ApiStep2'], /Application → Local storage/);
+  assert.match(MESSAGES.en['settings.thirdparty.sub2ApiStep4'], /dedicated dashboard session/);
+});
+
+test('New API compatibility stays in the preset but not saved-account cards', () => {
+  assert.equal(MESSAGES.en['settings.thirdparty.presetNewApi'], 'New API-compatible');
+  assert.equal(MESSAGES.en['settings.thirdparty.detailNewApiAccount'], 'New API · Account');
+  assert.equal(MESSAGES['zh-TW']['settings.thirdparty.presetNewApi'], 'New API 相容');
+  assert.equal(MESSAGES['zh-TW']['settings.thirdparty.detailNewApiAccount'], 'New API · 帳戶');
+});
+
 test('resolveLocale maps auto to Chinese variants from browser languages', () => {
   assert.equal(resolveLocale('auto', ['zh-HK', 'en-US']), 'zh-TW');
   assert.equal(resolveLocale('auto', ['zh-Hans-CN', 'en-US']), 'zh-CN');
@@ -128,6 +161,8 @@ test('tool health copy stays compact and describes snapshots, not liveness', () 
     '正常 7 · 待查 5 · 未安裝 9'
   );
   assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.addCustomSource'), '新增路徑');
+  assert.equal(translate('zh-TW', 'settings.tools.health.removeCustomSource'), '移除自訂來源');
   assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
   assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
   assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
@@ -162,6 +197,13 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
   assert.equal(translate('ko', 'settings.tray.limitsAllSessions'), '한도: 처음 두 도구의 주요 한도 (12% · 34%)');
 });
 
+test('live rate tray labels are translated in every bundled locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    assert.notEqual(translate(locale, 'settings.tray.liveTokenRate'), 'settings.tray.liveTokenRate');
+    assert.notEqual(translate(locale, 'trayMenu.content.liveTokenRate'), 'trayMenu.content.liveTokenRate');
+  }
+});
+
 test('window shortcut labels stay concise in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.display.windowShortcut'), '快捷鍵');
   assert.equal(translate('zh-TW', 'settings.shortcut.record'), '錄製');
@@ -176,9 +218,9 @@ test('window shortcut labels stay concise in Chinese', () => {
 });
 
 test('AI limit capability labels stay compact in Chinese', () => {
-  assert.equal(translate('en', 'settings.limits.capability.appCliRpc'), 'App/CLI RPC');
+  assert.equal(translate('en', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-TW', 'settings.limits.capability.appMustBeOpen'), '需開啟 App 或 CLI');
-  assert.equal(translate('zh-TW', 'settings.limits.capability.appCliRpc'), 'App/CLI RPC');
+  assert.equal(translate('zh-TW', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-TW', 'settings.limits.capability.manualLogin'), '手動登入');
   assert.equal(translate('zh-TW', 'settings.limits.status.openApp'), '請開啟 App 或 CLI');
   assert.equal(translate('zh-TW', 'settings.limits.status.linked'), '已連結');
@@ -189,10 +231,10 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.capability.web'), 'Web');
   assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
   assert.equal(translate('zh-TW', 'settings.limits.capability.codingPlan'), 'Coding Plan');
-  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 kimi-auth，複製它的 Value。');
-  assert.equal(translate('zh-TW', 'settings.kimi.apiFallback'), '選用：Kimi Code API 備援');
+  assert.equal(translate('zh-TW', 'settings.kimi.webFallback'), '選用：Kimi Web 備援');
+  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 access_token，複製它的 Value。');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
-  assert.equal(translate('zh-CN', 'settings.limits.capability.appCliRpc'), 'App/CLI RPC');
+  assert.equal(translate('zh-CN', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.manualLogin'), '手动登录');
   assert.equal(translate('zh-CN', 'settings.limits.device.from', { device: 'work-mac' }), '来自 work-mac');
   assert.equal(translate('zh-CN', 'settings.limits.status.noSyncedData'), '暂无同步数据');

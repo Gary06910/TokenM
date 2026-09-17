@@ -26,6 +26,7 @@ const {
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
+const { limitProviderCompactWindows } = require('../../src/electron/renderer/limitProviderPresentation');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };
@@ -55,11 +56,18 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   }
   assert.doesNotMatch(rule(css, '.home-activity-scroll'), /padding-block/);
   assert.match(rule(css, '.home-activity-canvas .heat-bright-layer'), /pointer-events:\s*none/);
+  const homeActivityHoverRule = css.match(
+    /\.home-activity-canvas \.heat\[data-active="true"\],\s*\.home-activity-canvas \.heat:hover\s*\{([^}]*)\}/
+  );
+  assert.ok(homeActivityHoverRule, 'Home activity hover rule exists');
+  assert.doesNotMatch(homeActivityHoverRule[1], /transform\s*:\s*scale/);
   assert.match(
     css,
     /\.home-activity-scroll\.is-restoring-hover \.heat,\s*\.home-activity-scroll\.is-restoring-hover \.heat-bright-layer\s*\{[^}]*transition:\s*none/
   );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
+  assert.match(rule(css, '.home-activity-tooltip'), /background:\s*rgba\(var\(--panel-rgb\), 0\.58\)/);
+  assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\) saturate\(120%\)/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
 });
 
@@ -178,6 +186,39 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
   assert.equal(rows[1].lowestRemaining, 70);
 });
 
+test('Home keeps canonical Codex quotas ahead of named additional windows', () => {
+  const windows = [
+    { kind: 'session', label: '5-hour', remainingPercent: 40 },
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 70 },
+    { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 },
+    { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 }
+  ];
+  const [row] = homeLimitAccounts([{
+    key: 'codex:0',
+    providerId: 'codex',
+    name: 'Codex',
+    windows: limitProviderCompactWindows('codex', windows)
+  }]);
+
+  assert.deepEqual(row.windows.map((window) => window.label), ['5-hour', 'Weekly']);
+});
+
+test('Home keeps Volcengine 5-hour and Daily as its two compact windows', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'volcengine:0',
+    providerId: 'volcengine',
+    name: 'Agent Plan Medium',
+    windows: [
+      { kind: 'billing', remainingPercent: 40 },
+      { kind: 'weekly', remainingPercent: 50 },
+      { kind: 'daily', remainingPercent: 60 },
+      { kind: 'session', remainingPercent: 70 }
+    ]
+  }]);
+
+  assert.deepEqual(row.windows.map((window) => window.kind), ['session', 'daily']);
+});
+
 test('homeLimitAccounts keeps a real billing remaining percentage fallback', () => {
   const rows = homeLimitAccounts([
     {
@@ -193,6 +234,61 @@ test('homeLimitAccounts keeps a real billing remaining percentage fallback', () 
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].windows.map((window) => ({ kind: window.kind, remainingPercent: window.remainingPercent })), [
     { kind: 'billing', remainingPercent: 93 }
+  ]);
+});
+
+test('homeLimitAccounts keeps Zed Edit Predictions and Token Spend as two quota windows', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'zed:0',
+    providerId: 'zed',
+    name: 'Zed',
+    windows: [
+      {
+        kind: 'billing',
+        limitId: 'zed.token-spend',
+        label: 'Token Spend',
+        used: 2.5,
+        limit: 10,
+        usedPercent: 25,
+        showMeter: true
+      },
+      {
+        kind: 'billing',
+        limitId: 'zed.edit-predictions',
+        label: 'Edit Predictions',
+        usedPercent: 0,
+        detail: 'Unlimited',
+        value: 'Unlimited',
+        showMeter: true
+      }
+    ]
+  }]);
+
+  assert.equal(row.providerId, 'zed');
+  assert.deepEqual(row.windows.map((window) => ({
+    label: window.label,
+    remainingPercent: window.remainingPercent,
+    showMeter: window.showMeter,
+    detail: window.detail,
+    value: window.value,
+    resetsAt: window.resetsAt
+  })), [
+    {
+      label: 'Token Spend',
+      remainingPercent: 75,
+      showMeter: true,
+      detail: '',
+      value: '',
+      resetsAt: undefined
+    },
+    {
+      label: 'Edit Predictions',
+      remainingPercent: 100,
+      showMeter: true,
+      detail: 'Unlimited',
+      value: 'Unlimited',
+      resetsAt: undefined
+    }
   ]);
 });
 
@@ -426,6 +522,24 @@ test('homeLimitAccountsForProviders can preserve configured provider order over 
   });
 
   assert.deepEqual(rows.map((row) => row.providerId), ['grok', 'claude']);
+});
+
+test('homeLimitAccountsForProviders preserves per-account adapter visuals', () => {
+  const rows = homeLimitAccountsForProviders({
+    providers: [{
+      provider: 'thirdparty',
+      adapterId: 'sub2api',
+      windows: [{ kind: 'billing', metric: 'credits', remaining: 12.5, currency: 'USD' }]
+    }],
+    providerOptions: [{ id: 'thirdparty', label: 'Third-party APIs' }],
+    enabledProviderIds: ['thirdparty'],
+    colors: { thirdparty: '#8090A6' },
+    accountColor: (provider, _id, fallback) => provider.adapterId === 'sub2api' ? '#39D9E7' : fallback,
+    accountIcon: (provider) => provider.adapterId
+  });
+
+  assert.equal(rows[0].color, '#39D9E7');
+  assert.equal(rows[0].iconId, 'sub2api');
 });
 
 test('homeTrendSummary returns the peak value and real date anchors', () => {
@@ -771,6 +885,42 @@ test('Home no longer synthesizes a balance window for DeepSeek', () => {
   assert.equal(row.windows[0].kind, 'billing');
   assert.equal(row.windows[0].metric, 'credits');
   assert.equal(row.windows[0].remaining, 4);
+});
+
+test('Home shows WorkBuddy credits through the shared credits contract', () => {
+  const [row] = homeLimitAccounts([{
+    key: 'workbuddy',
+    providerId: 'workbuddy',
+    name: 'WorkBuddy',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      metric: 'credits',
+      currency: 'CREDITS',
+      remaining: 1069.59,
+      limit: 1650,
+      used: 580.41,
+      usedPercent: 35.176,
+      remainingPercent: 64.824
+    }],
+    balance: { amount: 1069.59, currency: 'CREDITS' }
+  }]);
+
+  assert.equal(row.windows.length, 1);
+  assert.deepEqual(row.windows[0], {
+    kind: 'billing',
+    metric: 'credits',
+    label: 'Credits',
+    remainingPercent: 64.824,
+    remaining: 1069.59,
+    currency: 'CREDITS',
+    resetsAt: undefined,
+    resetDescription: '',
+    value: '',
+    planStatus: '',
+    showMeter: true,
+    detail: ''
+  });
 });
 
 test('Home shows a MiMo token plan and balance side by side', () => {

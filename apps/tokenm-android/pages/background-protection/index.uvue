@@ -1,0 +1,100 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="后台通知保护" :back="true" />
+        <text class="guide-intro">帮助后台和锁屏时及时收到提醒</text>
+        <text class="section-title">手机品牌</text>
+        <button class="btn section" @click="selectBrand">{{ guide.label }} ▼</button>
+        <text class="guide-note">不同系统版本名称可能略有不同，请以本机菜单为准。</text>
+        <status-marker :label="summary" tone="info" />
+        <notice-banner v-if="message.length > 0" tone="warning" :text="message" />
+        <view class="surface guide-card">
+          <text class="section-title">系统状态</text>
+          <text class="guide-state">系统通知 · {{ notificationProtectionLabel(notification) }}</text>
+          <button class="btn section" @click="openNotifications">打开系统通知设置</button>
+          <text class="guide-state">电池优化 · {{ batteryProtectionLabel(battery) }}</text>
+          <text class="guide-note">此项只检测 Android 标准电池优化；品牌后台管理设置需自行检查。</text>
+          <button v-if="battery != 'unsupported'" class="btn section" @click="openBattery">打开电池优化设置</button>
+        </view>
+        <view class="surface guide-card">
+          <text class="section-title">{{ guide.label }} 后台运行设置</text>
+          <view v-for="(step, index) in guide.steps" :key="step.title" class="section">
+            <text class="section-title">{{ index + 1 }}. {{ step.title }}</text>
+            <text class="guide-copy">{{ step.text }}</text>
+          </view>
+          <button class="btn section" @click="openApp">打开应用系统设置</button>
+          <button class="btn section" @click="openSystem">打开系统设置</button>
+          <text class="guide-state">{{ manualProtectionLabel(confirmations.guideConfirmed) }}</text>
+          <button class="btn btn-primary section" @click="toggleGuide">{{ confirmations.guideConfirmed ? '撤销我的确认' : '我已完成这些设置' }}</button>
+        </view>
+        <button class="btn section" @click="refresh">重新检查系统状态</button>
+        <text class="guide-note">品牌选择和手动确认仅保存在本机，不上传云端。更改品牌后，各自的确认状态分别保存。</text>
+        <view class="surface guide-card">
+          <text class="section-title">重要提示</text>
+          <text class="guide-limit">不要主动关闭 Token M。当前个人开发者版本从最近任务中被划掉后，实时通知可能无法及时送达。</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { readProtectionNotificationState, readBatteryOptimizationState, openProtectionNotificationSettings, openProtectionSystemSettings } from '../../services/background-protection.uts'
+import { readProtectionBrand, writeProtectionBrand, readProtectionConfirmations, writeProtectionConfirmation, protectionSummary, notificationProtectionLabel, batteryProtectionLabel, manualProtectionLabel } from '../../services/background-protection-state.uts'
+import type { ProtectionConfirmations, BackgroundGuideBrand } from '../../services/background-protection-state.uts'
+import { getBackgroundGuide } from '../../services/background-guides.uts'
+import type { BackgroundGuide } from '../../services/background-guides.uts'
+const brand = ref<BackgroundGuideBrand>('honor')
+const guide = ref<BackgroundGuide>(getBackgroundGuide('honor'))
+const notification = ref('unknown')
+const battery = ref('unknown')
+const summary = ref('建议配置')
+const message = ref('')
+const confirmations = ref<ProtectionConfirmations>({ guideConfirmed: false })
+const refresh = (): void => {
+  notification.value = readProtectionNotificationState()
+  battery.value = readBatteryOptimizationState()
+  message.value = ''
+  try {
+    brand.value = readProtectionBrand()
+    guide.value = getBackgroundGuide(brand.value)
+    confirmations.value = readProtectionConfirmations()
+    summary.value = protectionSummary(notification.value, battery.value, confirmations.value)
+  } catch (_error) {
+    confirmations.value = { guideConfirmed: false }
+    summary.value = '建议配置'
+    message.value = '无法读取本机确认记录，请重试。'
+  }
+}
+const selectBrand = (): void => {
+  uni.showActionSheet({ itemList: ['荣耀 / Honor', '小米 / Xiaomi / HyperOS'], success: (result) => {
+    const selected: BackgroundGuideBrand = result.tapIndex == 1 ? 'xiaomi' : 'honor'
+    try { writeProtectionBrand(selected); refresh() }
+    catch (_error) { message.value = '未能保存品牌选择，请重试。' }
+  } })
+}
+const toggleGuide = (): void => {
+  try { writeProtectionConfirmation(brand.value, !confirmations.value.guideConfirmed); refresh() }
+  catch (_error) { message.value = '未能保存本机确认，请重试。' }
+}
+const openSettings = (destination: string): void => {
+  if (!openProtectionSystemSettings(destination)) message.value = '请手动打开手机设置，按本页步骤检查 Token M。'
+}
+const openNotifications = (): void => { openProtectionNotificationSettings() }
+const openBattery = (): void => { openSettings('battery') }
+const openApp = (): void => { openSettings('app') }
+const openSystem = (): void => { openSettings('system') }
+onShow(() => { refresh() })
+</script>
+
+<style lang="scss">
+.guide-intro { margin-top: 12px; margin-bottom: 12px; color: $tm-text-2; font-size: 14px; line-height: 24px; }
+.guide-card { margin-top: 16px; padding: 16px; }
+.guide-state { margin-top: 8px; color: $tm-info; font-size: 13px; line-height: 21px; }
+.guide-copy { margin-top: 10px; color: $tm-text-2; font-size: 14px; line-height: 25px; white-space: pre-wrap; }
+.guide-note { margin-top: 8px; color: $tm-text-3; font-size: 12px; line-height: 20px; }
+.guide-limit { margin-top: 12px; color: $tm-warning; font-size: 14px; line-height: 24px; }
+</style>

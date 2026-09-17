@@ -6,10 +6,15 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const compactTokenApi = require('../../src/shared/compactTokens');
+const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 const {
   antigravityQuotaWindow,
   apiKeyAccountStatus,
+  codexAdditionalQuotaDisplayName,
   isCodexLiveAccount,
   limitProviderDisplayLabel,
   limitProviderCapabilityTags,
@@ -17,6 +22,7 @@ const {
   limitProviderCompactWindowPeriodLabel,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
+  limitProviderPlanDisplayLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -53,6 +59,30 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel('Team'), 'Team');
   assert.equal(limitProviderDisplayLabel('primary.user@example.com'), 'primary.user@example.com');
   assert.equal(limitProviderDisplayLabel(''), '');
+});
+
+test('Zed plan labels omit only the redundant provider prefix', () => {
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Student'), 'Student');
+  // Z.ai subscription names repeat the provider heading ("GLM Coding Pro");
+  // only the tier remains. Z.ai-prefixed and ZCode plan names keep theirs.
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Pro'), 'Pro');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Lite'), 'Lite');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'GLM Coding Max'), 'Max');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'Z.ai Max'), 'Z.ai Max');
+  assert.equal(limitProviderPlanDisplayLabel('zai', 'ZCode Start Plan'), 'ZCode Start Plan');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro'), 'Pro');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro Trial'), 'Pro Trial');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Business'), 'Business');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Custom Enterprise'), 'Custom Enterprise');
+  assert.equal(limitProviderPlanDisplayLabel('codex', 'ChatGPT Plus'), 'ChatGPT Plus');
+});
+
+test('Codex additional quota display names map gpt-reserve and preserve unknown names', () => {
+  assert.equal(codexAdditionalQuotaDisplayName('gpt-reserve'), 'Luna Reserve');
+  assert.equal(codexAdditionalQuotaDisplayName(' GPT-RESERVE '), 'Luna Reserve');
+  assert.equal(codexAdditionalQuotaDisplayName('codex_spark'), 'codex_spark');
+  assert.equal(codexAdditionalQuotaDisplayName('Codex Other'), 'Codex Other');
+  assert.equal(codexAdditionalQuotaDisplayName(''), '');
 });
 
 test('compact Antigravity labels distinguish duplicate periods by model group', () => {
@@ -122,6 +152,31 @@ test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pool
   assert.equal(limitProviderCompactWindows('antigravity', legacy), legacy);
 });
 
+test('compact Codex windows never backfill canonical lanes with additional quotas', () => {
+  const canonicalSession = { kind: 'session', label: '5-hour', remainingPercent: 40 };
+  const canonicalWeekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 70 };
+  const additionalSession = { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 };
+  const additionalWeekly = { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 };
+  const additionalWithoutLabel = { kind: 'session', label: '', limitId: 'codex-long-name', additional: true, remainingPercent: 100 };
+
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalSession, canonicalWeekly, additionalSession, additionalWeekly]),
+    [canonicalSession, canonicalWeekly]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalWeekly, additionalSession]),
+    [canonicalWeekly]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [canonicalSession, additionalWeekly]),
+    [canonicalSession]
+  );
+  assert.deepEqual(
+    limitProviderCompactWindows('codex', [additionalSession, additionalWeekly, additionalWithoutLabel]),
+    []
+  );
+});
+
 test('compact Antigravity labels preserve period fallback when groups are not distinct', () => {
   const differentPeriods = [
     { kind: 'session', label: 'Gemini 5-hour' },
@@ -188,6 +243,7 @@ function runProviderSpendNode(source, balance) {
   const spendNode = functionBody(source, 'providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
+    formatBalanceSpendAmount: (value, balance) => `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
     limitNoteRowNode: (options) => options
   };
   vm.runInNewContext(
@@ -198,7 +254,29 @@ function runProviderSpendNode(source, balance) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
-function runHomeLimitModule(rows, resetLabels = {}) {
+function runCodexAdditionalWindowLabel(window, siblingWindows) {
+  const app = readRendererFile('app.js');
+  const formatter = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  return vm.runInNewContext(
+    `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`,
+    { limitProviderPresentationApi: { codexAdditionalQuotaDisplayName } }
+  );
+}
+
+test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
+  const app = readRendererFile('app.js');
+  const spendValue = functionBody(app, 'formatCursorSpendValue', 'formatBalanceAmount');
+  const windows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+
+  assert.match(spendValue, /formatMoney\(used, window\?\.currency \|\| 'USD'\)/);
+  assert.match(spendValue, /limit !== null && limit > 0/);
+  assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
+  assert.match(windows, /quotaWindow\.metric === 'spend'/);
+  assert.match(windows, /formatCursorSpendValue\(quotaWindow\)/);
+  assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
+});
+
+function runHomeLimitModule(rows, boundaryLabels = {}) {
   const app = readRendererFile('app.js');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
   function createNode(tagName) {
@@ -221,7 +299,7 @@ function runHomeLimitModule(rows, resetLabels = {}) {
     iconKindFor: () => 'limits',
     homeLimitWindowLabel: (window) => window.label,
     formatHomeLimitWindowValue: () => '',
-    formatReset: (value) => resetLabels[value] || '',
+    formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
@@ -230,18 +308,25 @@ function runHomeLimitModule(rows, resetLabels = {}) {
   return body;
 }
 
-test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
+test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
-  const formatReset = functionBody(app, 'formatReset', 'formatDuration');
+  const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
+  const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
   const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
-  assert.match(formatReset, /limitResetRemainingMs\(value\)/);
-  assert.match(formatReset, /diffMs === 0\) return 'Reset now'/);
-  assert.match(formatReset, /return `Reset \$\{formatDuration\(diffMs\)\}`/);
-  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatReset\(window\.resetsAt\)/);
-  assert.doesNotMatch(limitWindow, /formatReset\(window\?\.resetsAt\) \|\| window\?\.resetDescription/);
-  assert.match(homeLimits, /window\.resetsAt\s*\? resetAt \|\|/);
+  const labels = vm.runInNewContext(
+    `${formatBoundary}\n${formatDuration}\n[\n`
+      + `formatLimitBoundary({ resetsAt: 'future' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' }),\n`
+      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'mixed' })\n]`,
+    { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
+  );
+  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']);
+  assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
+  assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
 });
 
@@ -255,10 +340,11 @@ test('Home omits reset rows that have no visible reset content', () => {
         { label: 'Balance', value: '$4.00' },
         { label: 'Expired', value: '0% left', resetsAt: 'expired' },
         { label: 'Weekly', value: '88% left', resetsAt: 'future' },
+        { label: 'Bonus', value: '50% left', resetsAt: 'expiry', boundaryKind: 'expiry' },
         { label: 'Monthly', value: '50% left', resetDescription: '6d 23h' }
       ]
     }
-  ], { future: 'Reset 1h' });
+  ], { future: 'Reset 1h', expiry: 'Expires 7d' });
 
   const metrics = body.children[0].children[1].children;
   assert.equal(metrics[0].children.length, 1);
@@ -266,14 +352,16 @@ test('Home omits reset rows that have no visible reset content', () => {
   assert.equal(metrics[2].children.length, 2);
   assert.equal(metrics[2].children[1].textContent, 'Reset 1h');
   assert.equal(metrics[3].children.length, 2);
-  assert.equal(metrics[3].children[1].textContent, 'Reset 6d 23h');
+  assert.equal(metrics[3].children[1].textContent, 'Expires 7d');
+  assert.equal(metrics[4].children.length, 2);
+  assert.equal(metrics[4].children[1].textContent, 'Reset 6d 23h');
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'App/CLI RPC']);
-  assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Manual login', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
+  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
+  assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
+  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
   assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
@@ -365,23 +453,25 @@ test('named API profile toggles update immediately and roll back failed persiste
 });
 
 test('undetected settings tags include status and supported collection hints', () => {
-  // Antigravity's "App/CLI must be open" capability restates the notConfigured
-  // status ("Open app or CLI"), so it is dropped to avoid a duplicate tag.
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'codex', status: 'notConfigured', source: 'oauth' })
+      .map((tag) => tag.label),
+    ['Not set up', 'Auto', 'OAuth/App/CLI']
+  );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'notConfigured', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Open app or CLI', 'RPC']
+    ['Not set up', 'Auto', 'OAuth/App/CLI']
   );
-  // Other failure states don't say "Open app or CLI", so the hint stays useful.
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'unavailable', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Unavailable', 'App/CLI must be open', 'RPC']
+    ['Unavailable', 'Auto', 'OAuth/App/CLI']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'notConfigured', source: 'web' })
       .map((tag) => tag.label),
-    ['Sign in', 'Manual login', 'Web']
+    ['Sign in', 'Auto', 'Web']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'notConfigured', source: 'web' })
@@ -398,6 +488,11 @@ test('detected settings tags show only current source after status', () => {
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'ok', source: 'web' })
+      .map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'zed', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
     ['Linked', 'Web']
   );
@@ -712,6 +807,50 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.doesNotMatch(main, /process\.platform === 'darwin'\) sized\.setTemplateImage\(true\)/);
 });
 
+test('hidden Settings keeps the custom tray clock running without refreshing composer DOM', async () => {
+  const app = readRendererFile('app.js');
+  const syncClock = functionBody(app, 'syncCustomTrayClockTimer', 'refreshTrayComposers');
+  const maybeUpdateBarsIcon = `async ${functionBody(app, 'maybeUpdateBarsIcon', 'loadImage')}`;
+  const intervals = [];
+  let bubbleRenders = 0;
+  let scheduledRenders = 0;
+  const context = {
+    customTrayClockTimer: null,
+    isRendererWindowHidden: () => true,
+    isSettingsSurfaceVisible: () => false,
+    refreshTrayComposers: () => { throw new Error('hidden Settings refreshed composer DOM'); },
+    renderFloatingBubbleContent() { bubbleRenders += 1; },
+    setInterval: (callback, delay) => {
+      intervals.push({ callback, delay });
+      return 1;
+    },
+    clearInterval() {},
+    state: {
+      settings: {
+        trayContent: 'custom',
+        trayCustomLayout: { items: [{ type: 'clock' }] }
+      }
+    },
+    statsRenderScheduler: { request() { scheduledRenders += 1; } },
+    trayLayoutApi: { trayLayoutNeedsClock: () => true },
+    window: {
+      TokenMonitorTrayText: { isGeneratedTrayIconMode: () => false },
+      tokenMonitor: {}
+    }
+  };
+
+  await vm.runInNewContext(
+    `${syncClock}\n${maybeUpdateBarsIcon}\nmaybeUpdateBarsIcon();`,
+    context
+  );
+
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].delay, 30_000);
+  await intervals[0].callback();
+  assert.equal(bubbleRenders, 0);
+  assert.equal(scheduledRenders, 1);
+});
+
 test('provider tray badges are opt-in and keep monochrome assets visible', () => {
   const app = readRendererFile('app.js');
   const html = readRendererFile('index.html');
@@ -725,8 +864,10 @@ test('provider tray badges are opt-in and keep monochrome assets visible', () =>
   assert.match(app, /showTrayProviderBadgeInput: document\.getElementById\('showTrayProviderBadgeInput'\)/);
   assert.match(app, /saveSettings\(\{ showTrayProviderBadge: els\.showTrayProviderBadgeInput\.checked \}\)/);
   assert.match(app, /deliverTrayProviderIcons\(patch\.showTrayProviderBadge === true\)/);
-  // `trayInk` is what lets a flat-ink mark be re-inked for the taskbar it will sit on.
-  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true \}\)/);
+  // `trayInk` is what lets a flat-ink mark be re-inked for the taskbar it will sit
+  // on; `standalone` is what lets it fill the Windows cell instead of carrying the
+  // optical inset a composed icon needs (#314).
+  assert.match(app, /providerImageToPngDataUrl\(img, 44, showBadge, \{ trayInk: true, standalone: true \}\)/);
   // A system-theme flip invalidates BOTH tray bitmap caches. Repainting only the
   // generated one leaves the usage modes showing the provider icon main cached
   // under the old ink, which is the whole bug on a taskbar that just went dark.
@@ -766,6 +907,100 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
+});
+
+test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const css = readRendererFile('styles.css');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
+  assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
+  assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
+  // The money belongs in the detail slot under the bar, not in the headline
+  // value: a valueOverride also disables the showLimitUsed flip for the row.
+  assert.match(
+    renderProviderWindows,
+    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*formatZedBillingDetail\(billing\)\s*\)/
+  );
+  assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
+  assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
+  assert.match(css, /^\.row-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/m);
+});
+
+test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
+  const app = readRendererFile('app.js');
+  const formatter = functionBody(app, 'formatZedBillingDetail', 'formatBalanceAmount');
+  const limitCount = functionBody(app, 'formatLimitCount', 'formatCommandcodeCreditsDetail');
+  const renderDetail = (window, showLimitUsed = false) => vm.runInNewContext(
+    `${formatter}\n${limitCount}\nformatZedBillingDetail(${JSON.stringify(window)});`,
+    {
+      state: { settings: { showLimitUsed } },
+      optionalFiniteNumber: (value) => Number.isFinite(Number(value)) ? Number(value) : null,
+      formatMoney: (value, currency) => `${currency === 'USD' ? '$' : `${currency} `}${Number(value).toFixed(2)}`
+    }
+  );
+
+  const editPredictions = { limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
+  const tokenSpend = { limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
+
+  // Quota mode: the detail mirrors the bar, which fills with what is left.
+  assert.equal(renderDetail(editPredictions), '1500/2000');
+  assert.equal(renderDetail(tokenSpend), '$7.50 / $10.00');
+  assert.equal(renderDetail(editPredictions, true), '500/2000');
+  assert.equal(renderDetail(tokenSpend, true), '$2.50 / $10.00');
+  // Unlimited Edit Predictions carry no numbers; the headline says it instead.
+  assert.equal(renderDetail({ limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
+});
+
+test('Zed compact windows label unlimited Edit Predictions without a fake reset', () => {
+  const editPredictions = {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    detail: 'Unlimited',
+    resetDescription: 'Unlimited',
+    showMeter: false
+  };
+  const tokenSpend = {
+    kind: 'billing',
+    limitId: 'zed.token-spend',
+    label: 'Token Spend',
+    usedPercent: 25
+  };
+
+  assert.deepEqual(limitProviderCompactWindows('zed', [tokenSpend, editPredictions]), [
+    tokenSpend,
+    { ...editPredictions, value: 'Unlimited', resetDescription: '' }
+  ]);
+});
+
+test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
+  const app = readRendererFile('app.js');
+  const valueFunction = functionBody(app, 'creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const value = vm.runInNewContext(
+    `${valueFunction}\ncreditsBalanceValue({ balance: { amount: null, currency: 'CREDITS' } }, { detail: 'unlimited', remaining: null });`,
+    {
+      creditsAmount: () => null,
+      formatCompactMoney: () => '',
+      t: (key) => key === 'settings.thirdparty.unlimited' ? 'Unlimited' : key
+    }
+  );
+
+  assert.equal(value, 'Unlimited');
+  assert.match(renderProviderWindows, /const value = creditsBalanceValue\(provider, credits\);/);
+  assert.match(renderProviderWindows, /if \(credits && value\)/);
+  assert.doesNotMatch(renderProviderWindows, /if \(credits && amount !== null\)/);
+  assert.match(
+    renderProviderWindows,
+    /const displayWindow = \{\s*\.\.\.credits,\s*label: credits\.label \|\| 'Credits'\s*\};/
+  );
+  assert.match(
+    renderProviderWindows,
+    /if \(!displayWindow\.resetsAt && !displayWindow\.resetDescription\) \{\s*node\.classList\.add\('limit-window-no-reset'\);\s*\}/
+  );
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
@@ -866,33 +1101,58 @@ test('Ollama renders Session and Weekly usage windows', () => {
   assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly/);
 });
 
-test('Volcengine renders 5-hour, Weekly, and Monthly quota windows', () => {
+test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
   const app = readRendererFile('app.js');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
 
   assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
   assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const daily = windowForKind\(provider, 'daily'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(session\.label \|\| '5-hour', session, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Daily', daily, color, 0\.78\)/);
   assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limitWindowNode\('Monthly', monthly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\)/);
+  assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\)/);
+  assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
 
-test('Z.ai renders 5-hour and Weekly first, then MCP full-width', () => {
+test('Z.ai and Team keep all billing windows and render MCP full width after paired quotas', () => {
   const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-
-  assert.match(renderProviderWindows, /provider\.provider === 'zai'/);
-  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const mcp = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /const fiveHourNode = limitWindowNode\('5-hour', fiveHour, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /if \(!weekly\) fiveHourNode\.classList\.add\('limit-window-wide'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const mcpNode = limitWindowNode\('MCP', mcp, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /mcpNode\.classList\.add\('limit-window-wide'\)/);
+  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const node = () => ({ children: [], classes: new Set(),
+    classList: { add(...values) { values.forEach(value => this.owner.classes.add(value)); } },
+    append(...children) { this.children.push(...children); } });
+  const makeNode = () => { const result = node(); result.classList.owner = result; return result; };
+  for (const provider of ['zai', 'zaiteam']) {
+    const context = {
+      document: { createElement: makeNode },
+      windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
+      windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
+      limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
+      provider: { provider, windows: [
+        { kind: 'weekly', label: 'Weekly' },
+        { kind: 'billing', label: 'MCP' },
+        { kind: 'billing', label: 'Legacy bucket', detail: 'Missing plan id' }
+      ] }
+    };
+    const rendered = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.deepEqual(Array.from(rendered.children, n => n.label), ['Weekly', 'MCP', 'Legacy bucket']);
+    assert.ok(rendered.children.every(n => n.classes.has('limit-window-wide')));
+    assert.equal(rendered.children[2].detail, 'Missing plan id');
+    context.provider.windows = [
+      { kind: 'daily', label: 'model-alpha', detail: 'Daily' },
+      { kind: 'billing', limitId: 'model-beta', label: 'model-beta', detail: 'Combined grant' },
+      { kind: 'billing', label: 'MCP' }
+    ];
+    const paired = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    assert.equal(paired.children[0].detail, 'Daily');
+    assert.equal(paired.children[1].detail, 'Combined grant');
+    assert.equal(paired.children[0].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[1].classes.has('limit-window-wide'), false);
+    assert.equal(paired.children[2].classes.has('limit-window-wide'), true);
+  }
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
@@ -908,7 +1168,9 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const codexAdditionalWindowLabel = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   const resetCreditsValue = functionBody(app, 'formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
   const resetCreditExpirationDates = functionBody(app, 'codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
   const resetCreditExpiryLabel = functionBody(app, 'codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
@@ -922,11 +1184,26 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
-  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /const session = codexCanonicalWindow\(provider, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = codexCanonicalWindow\(provider, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(main, /showCodexAdditionalLimits: true/);
+  assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
+  assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
+  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
+  assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
+  assert.match(codexAdditionalWindowLabel, /codexAdditionalQuotaDisplayName\(name\)/);
+  assert.match(codexAdditionalWindowLabel, /matchingWindowCount > 1 && period \? `\$\{displayName\} · \$\{period\}` : displayName/);
+  assert.match(codexAdditionalWindowLabel, /codexAdditionalWindowPeriodLabel\(window\)/);
+  assert.match(codexAdditionalWindowLabel, /minutes % 60 === 0/);
+  assert.match(styles, /\.limit-window-text span:first-child \{[\s\S]*text-overflow: ellipsis;/);
   assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
   assert.match(resetCreditsValue, /if \(count <= 0\) return '';/);
@@ -976,6 +1253,19 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(styles, /\.limit-detail-tooltip-row\s*\{[^}]*display: contents;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:last-child\s*\{[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /\.limit-reset-credits-clock/);
+});
+
+test('Codex additional quota labels omit a redundant period unless one name has multiple windows', () => {
+  const weekly = { kind: 'weekly', label: 'gpt-reserve', windowMinutes: 10_080 };
+  const session = { kind: 'session', label: 'gpt-reserve', windowMinutes: 300 };
+  const hourly = { kind: 'session', label: 'Some quota', windowMinutes: 60 };
+  const daily = { kind: 'daily', label: 'Some quota', windowMinutes: 1_440 };
+
+  assert.equal(runCodexAdditionalWindowLabel(weekly, [weekly]), 'Luna Reserve');
+  assert.equal(runCodexAdditionalWindowLabel(session, [session, weekly]), 'Luna Reserve · 5-hour');
+  assert.equal(runCodexAdditionalWindowLabel(weekly, [session, weekly]), 'Luna Reserve · Weekly');
+  assert.equal(runCodexAdditionalWindowLabel(hourly, [hourly, daily]), 'Some quota · 1-hour');
+  assert.equal(runCodexAdditionalWindowLabel(daily, [hourly, daily]), 'Some quota · Daily');
 });
 
 function runClaudePrepaidGrantRows(app, tranches, currency, now) {
@@ -1090,8 +1380,8 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
-  assert.match(valueFormatter, /if \(window\?\.metric === 'credits'\) \{/);
-  assert.match(valueFormatter, /return formatCompactMoney\(window\.remaining, window\.currency\);/);
+  assert.match(valueFormatter, /if \(isCreditsWindow\(window\)\) \{/);
+  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency\)/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
@@ -1164,6 +1454,7 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
   assert.equal(missingWeek.summary, 'Today CNY 0.00 · Month CNY 2.50');
   assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
   assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
+
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
@@ -1171,7 +1462,10 @@ test('Balance and token quota values omit the redundant left suffix', () => {
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
 
   assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
-  assert.match(renderProviderWindows, /\{ \.\.\.\(quotaWindow \|\| \{ showMeter: false \}\), label: balanceLabel \},\s*color,\s*0\.95,\s*balanceValue/);
+  assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
+  assert.match(renderProviderWindows, /\{\s*\.\.\.\(quotaWindow \|\| \{ showMeter: false \}\),\s*label: balanceLabel,/);
+  assert.match(renderProviderWindows, /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
+  assert.match(renderProviderWindows, /\},\s*color,\s*0\.95,\s*balanceValue/);
   assert.doesNotMatch(renderProviderWindows, /`\$\{formatMoney\(balanceAmount, currency\)\} left`/);
   assert.doesNotMatch(renderProviderWindows, /`\$\{balanceValue\} left`/);
 });
@@ -1263,7 +1557,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'commandcode', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'factory', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
@@ -1354,7 +1648,7 @@ test('Grok is automatic provider UI, while env token remains documented for head
   const i18n = readRendererFile('i18n.js');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'grokLimits.js'), 'utf8');
+  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'grok', 'limits.js'), 'utf8');
   const rendererSettings = main.slice(
     main.indexOf('function settingsForRenderer'),
     main.indexOf('function pushSettingsToRenderer')
@@ -1411,6 +1705,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
     ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
+    ['trae', 'traeAccountGroup', 'traeAccountStatus'],
     ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
@@ -1495,6 +1790,7 @@ test('background provider rerenders preserve settings scroll without a focused c
     {
       cancelAnimationFrame: () => {},
       els,
+      isRendererWindowHidden: () => false,
       limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
@@ -1511,6 +1807,37 @@ test('background provider rerenders preserve settings scroll without a focused c
   frames[0]();
   assert.equal(panel.scrollTop, 684);
   assert.equal(panel.scrollLeft, 9);
+});
+
+test('hidden settings rerenders skip settings panel scroll DOM', () => {
+  const app = readRendererFile('app.js');
+  const preserveScroll = functionBody(app, 'preserveSettingsPanelScroll', 'saveSettings');
+  let reads = 0;
+  let writes = 0;
+  const metrics = { callbacks: 0 };
+  const panel = { classList: { contains: () => false } };
+  for (const key of ['scrollTop', 'scrollLeft']) {
+    Object.defineProperty(panel, key, {
+      get() { reads += 1; return 0; },
+      set() { writes += 1; }
+    });
+  }
+
+  vm.runInNewContext(
+    `${preserveScroll}\npreserveSettingsPanelScroll(() => { metrics.callbacks += 1; });`,
+    {
+      els: { settingsPanel: panel },
+      isRendererWindowHidden: () => true,
+      metrics,
+      panel,
+      requestAnimationFrame: () => { throw new Error('hidden render scheduled a frame'); },
+      settingsScrollInteractionRevision: 0
+    }
+  );
+
+  assert.equal(reads, 0);
+  assert.equal(writes, 0);
+  assert.equal(metrics.callbacks, 1);
 });
 
 test('user scrolling wins over a pending provider scroll restore', () => {
@@ -1553,6 +1880,7 @@ renderLimitProviderCheckboxes();`,
       cancelAnimationFrame: () => {},
       document: { querySelectorAll: () => [] },
       els,
+      isRendererWindowHidden: () => false,
       limitProviderRowDrag: { deferRender: () => false },
       renderLimitProviderCheckboxesNow,
       requestAnimationFrame: (callback) => frames.push(callback)
@@ -1579,6 +1907,7 @@ test('dynamic account summaries are never reset by the static translation pass',
     'zaiteamAccountStatus',
     'volcengineAccountStatus',
     'qoderAccountStatus',
+    'traeAccountStatus',
     'ollamaAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
@@ -1596,10 +1925,120 @@ test('dynamic account summaries are never reset by the static translation pass',
 test('provider toggles converge through the limits push without a forced refresh', () => {
   const app = readRendererFile('app.js');
   const body = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
+  const statsRenderStart = app.indexOf('function renderStatsUpdate()');
+  const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
 
-  assert.match(body, /saveSettings\(\{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \}\)/);
+  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
+  assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
+  assert.doesNotMatch(body, /state\.settings\s*=/);
   assert.doesNotMatch(body, /refreshStats\(/);
+  assert.ok(statsRenderStart >= 0 && statsRenderEnd > statsRenderStart);
+  assert.match(app.slice(statsRenderStart, statsRenderEnd), /renderLimitProviderCheckboxes\(\)/);
+});
+
+function createLimitProviderToggleHarness({
+  providerIds = ['codex'],
+  saveSettings
+} = {}) {
+  const app = readRendererFile('app.js');
+  const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
+  const toggleStart = app.indexOf('async function onLimitProviderToggle()');
+  const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
+  const toggle = app.slice(toggleStart, toggleEnd);
+  let checkedProviders = [];
+  const context = {
+    DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
+    LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
+    limitProviderOrderApi,
+    settingsListFilterApi,
+    state: {
+      breakdown: 'tool',
+      limitProviderSelectionRevision: 0,
+      pendingLimitProviderSelection: null,
+      settings: { limitsEnabled: true, limitProviders: 'codex' }
+    },
+    els: {
+      limitProviderCheckboxes: {
+        querySelectorAll: () => providerIds.map((id) => ({
+          checked: checkedProviders.includes(id),
+          dataset: { provider: id }
+        }))
+      }
+    },
+    saveSettings,
+    renderLimitProviderCheckboxes() {},
+    clearDisabledLimitProviderPendingChecks() {},
+    setBreakdown() {}
+  };
+
+  vm.createContext(context);
+  vm.runInContext(`${providerSelection}\n${enabledProviderSelection}\n${toggle}`, context);
+  context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
+  return {
+    context,
+    selection: () => Array.from(context.configuredLimitProviderSelection()),
+    setChecked: (ids) => { checkedProviders = ids; },
+    toggle: () => vm.runInContext('onLimitProviderToggle()', context)
+  };
+}
+
+test('pending provider selection stays unchecked while the settings reply is pending', async () => {
+  let resolveUpdate;
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => new Promise((resolve) => { resolveUpdate = resolve; })
+  });
+  harness.setChecked([]);
+
+  const pendingToggle = harness.toggle();
+  assert.deepEqual(harness.selection(), []);
+  harness.context.state.settings = { limitsEnabled: false, limitProviders: '' };
+  resolveUpdate();
+  await pendingToggle;
+
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), []);
+});
+
+test('provider toggle restores the confirmed selection when persistence and recovery both fail', async () => {
+  const harness = createLimitProviderToggleHarness({
+    saveSettings: () => Promise.reject(new Error('persist failed'))
+  });
+  harness.setChecked([]);
+
+  await assert.rejects(harness.toggle(), /persist failed/);
+
+  assert.deepEqual(harness.selection(), ['codex']);
+});
+
+test('overlapping failures preserve the latest toggle, then fall back to a newer settings push', async () => {
+  const updates = [];
+  const harness = createLimitProviderToggleHarness({
+    providerIds: ['codex', 'claude', 'zed'],
+    saveSettings() {
+      let reject;
+      const promise = new Promise((_, rejectPromise) => { reject = rejectPromise; });
+      updates.push({ reject });
+      return promise;
+    }
+  });
+  harness.setChecked([]);
+  const firstToggle = harness.toggle();
+  harness.setChecked(['claude']);
+  const secondToggle = harness.toggle();
+  harness.context.state.settings = { limitsEnabled: true, limitProviders: 'zed' };
+
+  updates[0].reject(new Error('first persist failed'));
+  await assert.rejects(firstToggle, /first persist failed/);
+  assert.deepEqual(harness.selection(), ['claude']);
+
+  updates[1].reject(new Error('second persist failed'));
+  await assert.rejects(secondToggle, /second persist failed/);
+  assert.equal(harness.context.state.pendingLimitProviderSelection, null);
+  assert.deepEqual(harness.selection(), ['zed']);
 });
 
 test('empty OpenCode profiles render a localized summary before returning', () => {
@@ -1752,14 +2191,19 @@ test('provider option rerenders reuse the existing switch DOM', () => {
   assert.doesNotMatch(renderList, /renderLimits\(\);/);
 });
 
-test('settings pushes do not trigger a second full settings sync after save', () => {
+test('settings pushes sync once while repainting the background main view', () => {
   const app = readRendererFile('app.js');
   const save = functionBody(app, 'saveSettings', 'renderHomeIfVisible');
+  const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
 
   assert.match(save, /const settingsPushRevision = state\.settingsPushRevision;/);
   assert.match(save, /if \(state\.settingsPushRevision === settingsPushRevision\) \{\s*preserveSettingsPanelScroll\(syncSettingsForm\);/);
   assert.match(settingsPush, /state\.settingsPushRevision \+= 1;/);
+  assert.match(syncSettings, /if \(!isSettingsSurfaceVisible\(\)\) return;/);
+  assert.doesNotMatch(syncSettings, /\b(?:render|renderLimits|applyFloatingBubbleState)\(/);
+  assert.match(settingsPush, /if \(isSettingsSurfaceVisible\(\)\) render\(\); else statsRenderScheduler\.request\(\);/);
+  assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
 test('main limits rerenders coalesce identical visible provider data', () => {
@@ -1797,7 +2241,9 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
   assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
-  assert.match(renderSettings, /connectionDetailKey && tagInfo\.label === 'Auto'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup/);
+  assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup && tagInfo\.label === 'Auto'/);
   assert.match(renderSettings, /accountGroup && tagInfo\.label === 'Manual login'/);
   assert.match(renderSettings, /if \(duplicatesInlineSetup\) continue/);
   assert.match(renderSettings, /main\.append\(copy, actions\)/);
@@ -1822,7 +2268,9 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   const css = readRendererFile('styles.css');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
 
-  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}`/);
+  // The filter appends its own class after this one, so match the disabled part
+  // rather than pinning the whole template literal.
+  assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}/);
   assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-main\s*\{[^}]*color: var\(--muted\)/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);
@@ -1937,6 +2385,30 @@ test('account validation keeps aggregate fallback for legacy stats without devic
 
 const presentation = require('../../src/electron/renderer/limitProviderPresentation');
 
+test('Antigravity uses the shared OAuth source label', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
+});
+
+test('Zed identifies its manual web-session setup and dashboard source', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'zed', source: 'web' }), 'Web');
+});
+
+test('Antigravity account verification is shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'antigravity',
+      status: 'unauthorized',
+      actionRequired: 'accountVerification'
+    }),
+    {
+      label: 'Open Antigravity to verify',
+      key: 'settings.antigravity.verificationRequired',
+      tone: 'setup'
+    }
+  );
+});
+
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
   assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ['Pay-as-you-go', 'API key']);
@@ -2012,15 +2484,31 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
   );
 });
 
-test('Z.ai, Volcengine, Qoder, and Ollama source labels and setup statuses', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Coding Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Coding Plan', 'API key']);
+test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ['Auto', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'arkcli');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'factory', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'factory', status: 'unauthorized' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'zai', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -2035,6 +2523,22 @@ test('Z.ai, Volcengine, Qoder, and Ollama source labels and setup statuses', () 
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'qoder', status: 'unauthorized' }),
+    { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'trae', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'trae', status: 'unauthorized' }),
+    { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
@@ -2070,10 +2574,12 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi usage and limits share the canonical provider id and vendor color', () => {
+test('Kimi and Droid limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /\{ id: 'kimi', label: 'Kimi' \}/);
-  assert.match(app, /const color = id === 'mimo' \? clientColors\.xiaomi : \(clientColors\[id\] \|\| clientColors\.default\)/);
+  assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
+  assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
+  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 
 // A value produced inside a vm realm carries that realm's prototypes, which
@@ -2626,6 +3132,7 @@ test('deleting a subscription preserves the settings scroll position and renders
   };
   const context = vm.createContext({
     els: { settingsPanel: panel },
+    isRendererWindowHidden: () => false,
     panel,
     settingsScrollInteractionRevision: 0,
     requestAnimationFrame(callback) {
@@ -2747,10 +3254,8 @@ test('the record kind swaps whole field groups, and the user has the last word',
   assert.match(apply, /setSubscriptionFormKind\(isCreditsProvider\(subscriptionSelectedAccount\(\)\) \? 'topup' : 'subscription'\)/);
   assert.match(mode, /els\.subscriptionPlanFields\?\.classList\.toggle\('hidden', topUp\)/);
   assert.match(mode, /els\.subscriptionTopUpFields\?\.classList\.toggle\('hidden', !topUp\)/);
-  // This stylesheet has no blanket `.hidden` rule, so toggling the class only
-  // hides anything because these wrappers declare one.
-  const styles = readRendererFile('styles.css');
-  assert.match(cssBlock(styles, '.subscription-kind-fields.hidden'), /display: none;/);
+  // Hiding is the stylesheet's one blanket rule; what matters here is which of
+  // the two groups the markup starts on.
   assert.match(html, /id="subscriptionPlanFields" class="subscription-kind-fields"/);
   assert.match(html, /id="subscriptionTopUpFields" class="subscription-kind-fields hidden"/);
 
@@ -3195,20 +3700,10 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
 test('every provider a subscription can name has a mark to identify it by', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const providerBlock = app.slice(app.indexOf('const LIMIT_PROVIDERS = ['));
-  const ids = [...providerBlock.slice(0, providerBlock.indexOf('];')).matchAll(/\bid: '([^']+)'/g)]
-    .map((match) => match[1]);
-  assert.ok(ids.length >= 19, 'LIMIT_PROVIDERS should be parsed, not empty');
 
-  // .row-icon paints currentColor through a mask, so an id with no mask rule
-  // behind it renders as a solid square — worse than no icon at all.
-  for (const id of ids) {
-    assert.ok(
-      new RegExp(`\\.row-icon-${id}\\b[^{]*\\{`).test(styles),
-      `.row-icon-${id} mask rule should exist for LIMIT_PROVIDERS id ${id}`
-    );
-  }
-
+  // That every catalog provider has a mask rule to paint is asserted from the
+  // catalog in limitProviderPresentationCoverage.test.js. What is subscription
+  // wiring, and lives here, is that a subscription row asks for one.
   const iconClass = functionBody(app, 'subscriptionProviderIconClass', 'isCreditsProvider');
   const rows = functionBody(app, 'renderSubscriptionRows', 'renderSubscriptionPickers');
   // Unknown ids are the case the mask list cannot cover: a record stays bound to
@@ -4420,4 +4915,35 @@ test('switching hubs does not wait out the old hub request before starting', () 
   // Nothing awaits it any more, so it has to keep its own failures rather than
   // surface them as an unhandled rejection.
   assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
+});
+
+test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {
+  const window = { kind: 'daily', label: 'arbitrary-model-name' };
+  assert.equal(limitProviderCompactWindowLabel('zai', window), window.label);
+  assert.equal(limitProviderCompactWindowPeriodLabel('zai', window), '');
+  assert.equal(limitProviderCompactWindowLabel('zaiteam', window), '');
+});
+
+test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
+  const app = readRendererFile('app.js');
+  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatKiroOverageValue');
+  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => vm.runInNewContext(
+    `${body}\nformatZcodeTokensDetail(window)`,
+    {
+      window,
+      optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; },
+      formatCompact: (value) => compactTokenApi.formatCompactTokens(value, unitSystem, locale),
+      state: { settings: { showLimitUsed } }
+    }
+  );
+  const pool = { limit: 305_000_000, remaining: 195_850_553 };
+  assert.equal(detail(pool, false), '195.9M / 305M');
+  assert.equal(detail(pool, true), '109.1M / 305M');
+  assert.equal(detail(pool, false, 'localized', 'zh-TW'), '1.96億 / 3.05億');
+  // Buckets without absolute units keep their percentage-only look.
+  assert.equal(detail({ usedPercent: 42 }, false), '');
+  assert.equal(detail({ limit: 0, remaining: 5 }, false), '');
+  // Shared compact formatting keeps its normal rounding and promotion rules.
+  assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
+  assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
 });

@@ -1,0 +1,242 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content page-content-with-tabs">
+        <tm-header title="设置" />
+        <notice-banner v-if="banner.length > 0" tone="warning" :text="banner" action-text="重试" @action="refresh" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="list" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法载入设置" :detail="errorMessage" action-text="重试" @action="refresh" />
+        <view v-else>
+          <view class="profile-row section">
+            <view class="profile-mark"><text class="profile-initial">{{ profile.username.length > 0 ? profile.username.slice(0, 1).toUpperCase() : 'T' }}</text></view>
+            <view class="row-main">
+              <text class="row-title">{{ profile.username.length > 0 ? profile.username : loginFactView(facts.login).label }}</text>
+              <text class="row-meta">{{ profile.authenticated ? 'Token M 账户' : '登录后可管理云端数据' }}</text>
+            </view>
+          </view>
+
+        <view class="surface settings-group section">
+          <view class="setting-link row-press setting-link-last" hover-class="row-press-active" @click="goBackgroundProtection">
+            <view class="row-main"><text class="row-title">后台通知保护</text><text class="row-meta">帮助后台和锁屏时及时收到提醒</text><text class="row-meta">{{ backgroundProtectionStatus }}</text></view><text class="chevron">查看</text>
+          </view>
+        </view>
+          <text class="group-label">通知</text>
+          <view class="surface settings-group">
+            <view class="setting-row">
+              <view class="row-main">
+                <text class="row-title">任务通知</text>
+                <text class="row-meta">{{ notifications.notificationsEnabled ? '已开启 · Codex 完成时提醒你' : '已关闭 · 任务记录仍会保存' }}</text>
+              </view>
+              <switch :checked="notifications.notificationsEnabled" :disabled="updating || facts.login != 'signedIn' || facts.privacyConsent != 'current'" color="#2869c9" aria-label="任务通知开关" @change="toggleNotifications" />
+            </view>
+            <view class="setting-link row-press setting-link-last" hover-class="row-press-active" @click="goNotifications">
+              <view class="row-main"><text class="row-title">系统通知与服务</text><text class="row-meta">{{ permissionView(facts.notificationPermission).label }}</text><text class="row-meta">{{ mobileRegistrationFactView(facts.mobileRegistration).label }}</text></view><text class="chevron">查看</text>
+            </view>
+          </view>
+          <text class="group-label">隐私</text>
+          <view class="surface settings-group">
+            <view class="setting-link row-press setting-link-last" hover-class="row-press-active" @click="goPrivacy">
+              <view class="row-main"><text class="row-title">数据与隐私</text><text class="row-meta">{{ consentFactView(facts.privacyConsent).label }}</text><text class="row-meta">默认仅同步完成记录，上传模式在电脑端设置。</text></view><text class="chevron">查看</text>
+            </view>
+          </view>
+          <text class="group-label">应用</text>
+          <view class="surface settings-group">
+            <view class="setting-link row-press" hover-class="row-press-active" @click="goDesktops">
+              <view class="row-main"><text class="row-title">电脑连接</text><text class="row-meta">添加、重命名或解除绑定</text></view><text class="chevron">管理</text>
+            </view>
+            <view class="setting-link row-press setting-link-last" hover-class="row-press-active" @click="goAbout">
+              <view class="row-main"><text class="row-title">关于 Token M</text><text class="row-meta">版本与通知说明</text></view><text class="chevron">查看</text>
+            </view>
+          </view>
+          <button v-if="facts.login == 'signedIn'" :class="['btn', 'btn-danger', 'section', updating ? 'btn-disabled' : '']" hover-class="btn-active" :disabled="updating" @click="confirmLogout">退出登录</button>
+          <button v-else class="btn btn-primary section" hover-class="btn-primary-active" @click="goLogin">登录 Token M</button>
+        </view>
+      </view>
+    </scroll-view>
+    <tm-tab-bar selected="settings" />
+  </view>
+</template>
+
+<script setup lang="uts">
+import { nextTick, ref } from 'vue'
+import { onReady, onShow } from '@dcloudio/uni-app'
+import { getNotificationSettings, updateNotificationsEnabled } from '../../services/client.uts'
+import { getCurrentAccountProfile } from '../../services/auth-service.uts'
+import { canReuseProtectedPageData, prepareClientPage, settledRuntimeFacts, getRuntimeFacts, logoutClient } from '../../services/client-runtime.uts'
+import {
+  consentFactView,
+  loginFactView,
+  mobileRegistrationFactView,
+  permissionView,
+  presentError
+} from '../../services/presentation.uts'
+import type { AccountProfile, NotificationSettings, RuntimeFacts, UiLoadState } from '../../types/models.uts'
+import { settingsSnapshot, getPageCacheSession, isPageCacheSessionCurrent } from '../../services/page-cache.uts'
+import { navigateColumn, PageTiming } from '../../services/navigation-perf.uts'
+import { readProtectionNotificationState, readBatteryOptimizationState } from '../../services/background-protection.uts'
+import { readProtectionConfirmations, protectionSummary } from '../../services/background-protection-state.uts'
+
+const backgroundProtectionStatus = ref('需检查')
+const refreshBackgroundProtection = (): void => {
+  try {
+    backgroundProtectionStatus.value = protectionSummary(readProtectionNotificationState(), readBatteryOptimizationState(), readProtectionConfirmations())
+  } catch (_error) { backgroundProtectionStatus.value = '需检查' }
+}
+const goBackgroundProtection = (): void => {
+  uni.navigateTo({ url: '/pages/background-protection/index' })
+}
+
+const state = ref<UiLoadState>('loading')
+const profile = ref<AccountProfile>(getCurrentAccountProfile())
+const notifications = ref<NotificationSettings>({
+  notificationsEnabled: false,
+  permissionState: 'notDetermined',
+  clientRegistration: 'notStarted'
+})
+const facts = ref<RuntimeFacts>(getRuntimeFacts())
+const updating = ref(false)
+const banner = ref('')
+const errorMessage = ref('')
+const timing = new PageTiming('/pages/settings/index')
+let loading = false
+
+const restoreCached = () => {
+  const cached = canReuseProtectedPageData() ? settingsSnapshot.peek() : null
+  if (cached == null) { state.value = 'loading'; return }
+  notifications.value.notificationsEnabled = cached
+  facts.value = getRuntimeFacts()
+  profile.value = getCurrentAccountProfile()
+  state.value = 'ready'
+  nextTick(() => { timing.cachedReady() })
+}
+restoreCached()
+
+const runLoad = async (keepExisting: boolean) => {
+  if (loading || updating.value) return
+  loading = true
+  const session = getPageCacheSession()
+  const previousUpdate = settingsSnapshot.updatedAt
+  if (!keepExisting) state.value = 'loading'
+  try {
+    facts.value = await prepareClientPage()
+    settledRuntimeFacts().then((value: RuntimeFacts) => {
+      if (isPageCacheSessionCurrent(session)) facts.value = value
+    }).catch((_error) => {})
+    if (facts.value.login != 'signedIn') {
+      uni.reLaunch({ url: '/pages/login/index' })
+      return
+    }
+    if (facts.value.privacyConsent != 'current') {
+      uni.reLaunch({ url: '/pages/permission/index' })
+      return
+    }
+    if (!isPageCacheSessionCurrent(session)) return
+    const result = await getNotificationSettings()
+    if (!isPageCacheSessionCurrent(session) || updating.value) return
+    notifications.value = result
+    profile.value = getCurrentAccountProfile()
+    banner.value = ''
+    state.value = 'ready'
+    nextTick(() => {
+      if (settingsSnapshot.updatedAt > previousUpdate) timing.freshReady()
+      else timing.cachedReady()
+    })
+  } catch (error) {
+    if (!isPageCacheSessionCurrent(session) || updating.value) return
+    const shown = presentError(error, '服务暂时不可用，请稍后重试。')
+    if (keepExisting) banner.value = `更新失败：${shown}`
+    else {
+      errorMessage.value = shown
+      state.value = 'error'
+    }
+  } finally {
+    loading = false
+  }
+}
+
+const refresh = () => {
+  settingsSnapshot.expire()
+  runLoad(state.value == 'ready')
+}
+
+const runToggleNotifications = async (event: UniSwitchChangeEvent) => {
+  if (updating.value) return
+  const previous = notifications.value.notificationsEnabled
+  notifications.value.notificationsEnabled = event.detail.value
+  updating.value = true
+  try {
+    notifications.value = await updateNotificationsEnabled(event.detail.value)
+    uni.showToast({ title: event.detail.value ? '任务通知已开启' : '任务通知已关闭', icon: 'none' })
+  } catch (error) {
+    notifications.value.notificationsEnabled = previous
+    uni.showToast({ title: presentError(error, '服务暂时不可用，请稍后重试。'), icon: 'none' })
+  } finally {
+    updating.value = false
+  }
+}
+
+const toggleNotifications = (event: UniSwitchChangeEvent) => {
+  runToggleNotifications(event)
+}
+
+const goNotifications = () => {
+  uni.navigateTo({ url: '/pages/notifications/index' })
+}
+const goDesktops = () => {
+  navigateColumn('/pages/desktops/index')
+}
+const goPrivacy = () => {
+  uni.navigateTo({ url: '/pages/privacy/index' })
+}
+const goAbout = () => {
+  uni.navigateTo({ url: '/pages/about/index' })
+}
+const goLogin = () => {
+  uni.reLaunch({ url: '/pages/login/index' })
+}
+
+const runLogout = async () => {
+  updating.value = true
+  try {
+    const deviceDisabled = await logoutClient()
+    if (!deviceDisabled) uni.showToast({ title: '已退出；设备停用状态未能确认', icon: 'none' })
+    uni.reLaunch({ url: '/pages/onboarding/index' })
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '退出登录失败，本地会话未标记为已退出。'), icon: 'none' })
+    updating.value = false
+  }
+}
+
+const confirmLogout = () => {
+  if (updating.value) return
+  uni.showModal({
+    title: '退出登录',
+    content: '此设备会先停止通知监听并在业务设备列表中停用，然后退出账户。',
+    confirmText: '退出',
+    success: (result) => {
+      if (!result.confirm) return
+      runLogout()
+    }
+  })
+}
+onShow(() => {
+  refreshBackgroundProtection()
+  restoreCached()
+  runLoad(state.value == 'ready')
+})
+onReady(() => { timing.shellReady() })
+</script>
+
+<style lang="scss">
+.profile-row { min-height: 64px; flex-direction: row; align-items: center; }
+.profile-mark { width: 48px; height: 48px; margin-right: 12px; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: $tm-line-strong; border-radius: 12px; background-color: $tm-surface-1; }
+.profile-initial { color: $tm-info; font-size: 18px; font-weight: 600; line-height: 24px; }
+.setting-row { min-height: 64px; flex-direction: row; align-items: center; }
+.setting-row .row-main { margin-right: 12px; }
+.settings-list { border-top-width: 1px; border-top-style: solid; border-top-color: $tm-line; }
+.setting-link { min-height: 64px; flex-direction: row; align-items: center; padding-right: 4px; padding-left: 4px; border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: $tm-line; }
+.setting-link-last { border-bottom-width: 0; }
+.chevron { width: 48px; color: $tm-text-2; font-size: 12px; line-height: 48px; text-align: center; }
+.detail-row-last { border-bottom-width: 0; }
+.settings-group { padding-right: 16px; padding-left: 16px; }
+</style>

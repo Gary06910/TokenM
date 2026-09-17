@@ -10,7 +10,16 @@ module.exports = [
   includeIgnoreFile(path.resolve(__dirname, '.gitignore')),
   // site/ is a standalone GitHub Pages property with its own browser conventions
   // worker/src/shared/ is generated (vendored CommonJS); linted at its src/shared/ source
-  { ignores: ['site/**', 'worker/src/shared/**'] },
+  {
+    ignores: [
+      'site/**',
+      'worker/src/shared/**',
+      'apps/tokenm-android/uni_modules/**',
+      'apps/tokenm-android/unpackage/**',
+      'wechat-miniapp/**',
+      'docs/wechat-miniapp/**'
+    ]
+  },
 
   js.configs.recommended,
 
@@ -34,29 +43,11 @@ module.exports = [
   },
 
   {
-    // The isolated P0 spike server is an ESM-only Node project.
-    files: ['spikes/notification-server-p0/**/*.js'],
-    languageOptions: {
-      sourceType: 'module',
-      globals: { ...globals.node },
-    },
-  },
-
-  {
     // Cloudflare Worker is ESM with service-worker runtime globals
     files: ['worker/**/*.js'],
     languageOptions: {
       sourceType: 'module',
       globals: { ...globals.serviceworker, ...globals.browser },
-    },
-  },
-
-  {
-    // WeChat platform validation/scanning scripts are standalone Node ESM.
-    files: ['wechat-miniapp/config/**/*.mjs'],
-    languageOptions: {
-      sourceType: 'module',
-      globals: { ...globals.node },
     },
   },
 

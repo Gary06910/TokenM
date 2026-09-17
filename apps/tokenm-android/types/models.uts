@@ -1,0 +1,115 @@
+export type UiLoadState = 'loading' | 'ready' | 'error'
+export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
+export type DesktopStatus = 'active' | 'revoked'
+export type TaskFilter = 'all' | 'privacy' | 'full'
+export type TaskDeliveryFilter = 'all' | 'not_requested'
+export type DeliveryStatus = 'not_requested' | 'pending' | 'sending' | 'submitted' | 'failed' | 'unknown' | 'skipped_disabled' | 'skipped_no_target'
+export type NotificationPermissionState = 'notDetermined' | 'authorized' | 'denied'
+export type ClientRegistrationState = 'notStarted' | 'ready' | 'error'
+export type LoginFact = 'checking' | 'signedOut' | 'signedIn' | 'error'
+export type PrivacyConsentFact = 'checking' | 'required' | 'current' | 'error'
+export type MobileRegistrationFact = 'notStarted' | 'registering' | 'ready' | 'error' | 'disabled'
+export type PushReadiness = 'permission_required' | 'registration_required' | 'registration_error' | 'ready'
+export type PairingStatus = 'none' | 'active' | 'paired' | 'expired' | 'superseded' | 'locked'
+export type BackendVerificationState = 'checking' | 'available' | 'unavailable' | 'notApplicable'
+
+export type StatusView = {
+  label: string,
+  detail: string,
+  tone: Tone
+}
+
+export type AccountProfile = {
+  userId: string,
+  username: string,
+  authenticated: boolean
+}
+
+export type CaptchaChallenge = {
+  scene: string,
+  captchaBase64: string
+}
+
+export type PrivacyConsentRecord = {
+  requiredVersion: string,
+  acceptedVersion: string | null,
+  acceptedAt: string | null,
+  isCurrent: boolean
+}
+
+export type ClientBootstrapStatus = {
+  backend: BackendVerificationState
+  activeDesktopCount: number | null
+  notificationsEnabled: boolean | null
+  privacyConsent: PrivacyConsentRecord | null
+}
+
+export type RuntimeFacts = {
+  login: LoginFact,
+  privacyConsent: PrivacyConsentFact,
+  notificationPermission: NotificationPermissionState,
+  mobileRegistration: MobileRegistrationFact,
+  pushReadiness: PushReadiness,
+  recoveryCode: string | null
+}
+
+export type DesktopRecord = {
+  desktopId: string,
+  name: string,
+  status: DesktopStatus,
+  createdAt: string | null,
+  lastSeenAt: string | null,
+  lastEventAt: string | null
+}
+
+export type TaskRecord = {
+  taskId: string,
+  desktopId: string,
+  desktopName: string,
+  occurredAt: string,
+  privacyMode: boolean,
+  project: string | null,
+  model: string | null,
+  summary: string | null,
+  durationMs: number | null,
+  notificationStatus: DeliveryStatus
+}
+
+export type NotificationSettings = {
+  notificationsEnabled: boolean,
+  permissionState: NotificationPermissionState,
+  clientRegistration: ClientRegistrationState
+}
+
+export type DashboardView = {
+  todayCompletedCount: number,
+  activeDesktopCount: number,
+  desktops: DesktopRecord[],
+  recentTasks: TaskRecord[],
+  notifications: NotificationSettings
+}
+
+export type TaskPageResult = {
+  items: TaskRecord[],
+  nextCursor: TaskCursor | null
+}
+
+export type TaskCursor = {
+  createdAtMs: number,
+  taskId: string
+}
+
+export type PairingSession = {
+  sessionId: string,
+  code: string,
+  expiresAt: string,
+  status: PairingStatus,
+  desktopId: string | null
+}
+
+export type PairingStatusRecord = {
+  sessionId: string | null,
+  status: PairingStatus,
+  expiresAt: string | null,
+  desktopId: string | null
+}

@@ -26,16 +26,27 @@
     return Array.from(new Set((tools || []).filter(Boolean))).join(' · ');
   }
 
-  function turnRow(turn, index) {
+  function turnRow(turn, index, replyIndex) {
+    const isCompactionSummary = turn.type === 'compaction-summary';
+    const isAssistantAttempt = turn.type === 'assistant-attempt';
     return {
       key: `turn:${index}`,
-      label: `Reply #${index + 1}`,
+      label: isCompactionSummary ? 'Compaction summary' : (isAssistantAttempt ? 'Model attempt' : `Reply #${replyIndex + 1}`),
       value: finiteNumber(turn.tokens && turn.tokens.total),
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
       tokens: turn.tokens || {},
       tools: formatToolList(turn.tools)
     };
+  }
+
+  function turnRows(turns) {
+    let replyIndex = 0;
+    return (turns || []).map((turn, index) => {
+      const row = turnRow(turn, index, replyIndex);
+      if (turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt') replyIndex += 1;
+      return row;
+    });
   }
 
   function timeValue(value) {
@@ -65,7 +76,7 @@
         cost: finiteNumber(ex.costEstimate),
         startTime: timeValue(ex.startedAt),
         turnCount,
-        turns: (ex.turns || []).map(turnRow) // inner turns kept in chronological (file) order
+        turns: turnRows(ex.turns) // usage entries stay chronological; summaries do not consume reply numbers
       };
     });
     if (sortBy === 'tokens') rows.sort((a, b) => b.value - a.value || b.startTime - a.startTime);

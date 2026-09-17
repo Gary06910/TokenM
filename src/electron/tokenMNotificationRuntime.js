@@ -4,11 +4,10 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { normalizeCodexCompletion } = require('../shared/codexCompletion');
 const { writePrivateJsonAtomic } = require('../shared/credentialStore');
 const { createCodexHookBridge } = require('./codexHookBridge');
 const { disableCodexStopHook, enableCodexStopHook, readCodexHookState } = require('./codexStopHook');
-const { createWeChatNotificationRuntime } = require('./wechatNotificationRuntime');
+const { createAndroidNotificationRuntime } = require('./androidNotificationRuntime');
 
 function posixQuote(value) { return `'${String(value).replaceAll("'", `'"'"'`)}'`; }
 function windowsQuote(value) { return `"${String(value).replaceAll('"', '\\"')}"`; }
@@ -39,40 +38,107 @@ function createTokenMNotificationRuntime(options) {
   const legacyCommands = platform === 'win32' ? [legacyWindowsHookCommandFor({ executablePath, helperPath, runtimePath })] : [];
   const commandIdentity = { command, commandWindows, legacyCommands };
   let bridge = null; let stopped = true; let statusTimer = null; let lifecycle = Promise.resolve();
-  const wechat = createWeChatNotificationRuntime({ userDataPath, fetch, getSettings, commitSettings, logger, hostname });
+  const android = createAndroidNotificationRuntime({ userDataPath, fetch, getSettings, commitSettings, logger, hostname });
   function hookState() { return readCodexHookState({ codexHome, commandIdentity }); }
-  function publicStatus() { const hook = hookState(); return { hook: { enabled: hook.enabled, needsTrust: hook.needsTrust, error: hook.error }, wechat: wechat.publicStatus() }; }
+  function publicStatus() {
+    const hook = hookState();
+    return {
+      hook: { enabled: hook.enabled, needsTrust: hook.needsTrust, error: hook.error },
+      android: android.publicStatus()
+    };
+  }
   function publish() { const value = publicStatus(); emitStatus(value); return value; }
   function removeRuntimeMetadata() { try { fs.unlinkSync(runtimePath); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
   async function stopBridge() { const active = bridge; bridge = null; if (active) await active.stop(); removeRuntimeMetadata(); }
-  async function stopComponents() { if (statusTimer) clearInterval(statusTimer); statusTimer = null; await stopBridge(); await wechat.stop(); }
+  async function stopComponents() {
+    if (statusTimer) clearInterval(statusTimer);
+    statusTimer = null;
+    await stopBridge();
+    await android.stop();
+  }
   async function startBridge() {
-    if (bridge || !hookState().enabled || !wechat.isActive()) return;
+    const destination = android;
+    if (bridge || !hookState().enabled || !destination.isActive()) return;
     const token = crypto.randomBytes(32).toString('base64url');
     const instance = createCodexHookBridge({ host: '127.0.0.1', port: 0, token, logger, onCompletion: async (input) => {
-      const deviceId = wechat.identityDeviceId(); if (!deviceId) return;
-      const event = normalizeCodexCompletion(input, { deviceId });
-      try { await wechat.enqueue(event, input); } catch (error) { logger.warn?.('WeChat notification enqueue failed', { code: safeMachineCode(error) }); }
+      try {
+        await android.enqueue(input);
+      } catch (error) {
+        logger.warn?.('Notification enqueue failed', { code: safeMachineCode(error) });
+      }
       publish();
     } });
     const address = await instance.start();
     try { writePrivateJsonAtomic(runtimePath, { version: 1, host: '127.0.0.1', port: address.port, token }); bridge = instance; } catch (error) { await instance.stop(); throw error; }
   }
-  async function reconcileBridge() { return wechat.isActive() ? startBridge() : stopBridge(); }
-  async function startComponents() { await wechat.start(); await startBridge(); if (wechat.configuration().configured) { statusTimer = setInterval(() => { void wechat.refreshStatus().then(publish); }, 60_000); statusTimer.unref?.(); } }
+  async function startComponents() {
+    const destination = android;
+    await destination.start();
+    await startBridge();
+    if (destination.configuration().configured) {
+      statusTimer = setInterval(() => {
+        void destination.refreshStatus().then(publish);
+      }, 60_000);
+      statusTimer.unref?.();
+    }
+  }
+  async function reconcileComponents() {
+    await stopComponents();
+    if (!stopped) await startComponents();
+  }
   function inLifecycle(operation) { const run = lifecycle.then(operation, operation); lifecycle = run.catch(() => {}); return run; }
   return {
     commandIdentity: command, runtimePath,
     start() { stopped = false; return inLifecycle(async () => { await stopComponents(); if (!stopped) await startComponents(); return publish(); }); },
     stop() { stopped = true; return inLifecycle(async () => { await stopComponents(); return publicStatus(); }); },
-    shutdownSync() { stopped = true; if (statusTimer) clearInterval(statusTimer); statusTimer = null; removeRuntimeMetadata(); const active = bridge; bridge = null; if (active) void active.stop(); wechat.shutdownSync(); },
-    getStatus() { return inLifecycle(async () => { await wechat.refreshStatus(); return publish(); }); },
-    enableCodexHook() { return inLifecycle(async () => { if (!wechat.configuration().configured) throw new Error('notifications_not_configured'); const state = enableCodexStopHook({ codexHome, command, commandWindows, legacyCommands }); if (state.enabled) { await commitSettings({ tokenMCodexHookEnabled: true }); await startBridge(); } publish(); return state; }); },
+    shutdownSync() {
+      stopped = true;
+      if (statusTimer) clearInterval(statusTimer);
+      statusTimer = null;
+      removeRuntimeMetadata();
+      const active = bridge;
+      bridge = null;
+      if (active) void active.stop();
+      android.shutdownSync();
+    },
+    getStatus() { return inLifecycle(async () => { await android.refreshStatus(); return publish(); }); },
+    enableCodexHook() { return inLifecycle(async () => {
+      const destination = android;
+      if (!destination.configuration().configured) throw new Error('notifications_not_configured');
+      if (destination.publicStatus().bindingState !== 'bound') {
+        throw new Error('android_credential_invalid');
+      }
+      const state = enableCodexStopHook({ codexHome, command, commandWindows, legacyCommands });
+      if (state.enabled) {
+        await commitSettings({ tokenMCodexHookEnabled: true });
+        await startBridge();
+      }
+      publish();
+      return state;
+    }); },
     disableCodexHook() { return inLifecycle(async () => { const state = disableCodexStopHook({ codexHome, commandIdentity }); if (!state.error) await commitSettings({ tokenMCodexHookEnabled: false }); await stopBridge(); publish(); return state; }); },
-    pairWeChat(request) { return inLifecycle(async () => { await wechat.pair(request); await reconcileBridge(); return publish(); }); },
-    setWeChatEnabled(enabled) { return inLifecycle(async () => { await wechat.setEnabled(enabled === true); await reconcileBridge(); return publish(); }); },
-    setWeChatPrivacyMode(privacyMode) { return inLifecycle(async () => { await wechat.setPrivacyMode(privacyMode); return publish(); }); },
-    unpairWeChat() { return inLifecycle(async () => { await wechat.unpairSelf(); await reconcileBridge(); return publish(); }); }
+    pairAndroid(request) { return inLifecycle(async () => {
+      const pairing = android.pair(request);
+      publish();
+      try {
+        await pairing;
+        await reconcileComponents();
+      } catch (error) {
+        // Pairing restores the previous binding state on failure. Publish it
+        // as well so the renderer cannot remain stuck in the transient state.
+        publish();
+        throw error;
+      }
+      return publish();
+    }); },
+    setAndroidEnabled(enabled) { return inLifecycle(async () => {
+      await android.setEnabled(enabled === true);
+      await reconcileComponents();
+      return publish();
+    }); },
+    setAndroidPrivacyMode(privacyMode) { return inLifecycle(async () => { await android.setPrivacyMode(privacyMode); return publish(); }); },
+    unpairAndroid() { return inLifecycle(async () => { await android.unpairSelf(); await reconcileComponents(); return publish(); }); },
+
   };
 }
 module.exports = { createTokenMNotificationRuntime, hookCommandFor, legacyWindowsHookCommandFor };

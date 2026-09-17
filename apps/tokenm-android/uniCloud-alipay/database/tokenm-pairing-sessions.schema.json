@@ -1,0 +1,48 @@
+{
+  "bsonType": "object",
+  "description": "Server-only 6-digit, 600-second, single-use pairing sessions.",
+  "required": [
+    "_id",
+    "ownerId",
+    "status",
+    "attemptCount",
+    "maxAttempts",
+    "createdAtMs",
+    "expiresAtMs",
+    "codeUniquenessKey",
+    "ownerUniquenessKey"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": { "bsonType": "string", "maxLength": 64 },
+    "ownerId": { "bsonType": "string", "maxLength": 240 },
+    "code": { "description": "Six ASCII digits while active; null when terminal.", "maxLength": 6 },
+    "activeOwnerKey": { "description": "Authenticated uid while active; null when terminal.", "maxLength": 240 },
+    "codeUniquenessKey": {
+      "bsonType": "string",
+      "description": "Active code or a fresh random terminal tombstone.",
+      "maxLength": 64
+    },
+    "ownerUniquenessKey": {
+      "bsonType": "string",
+      "description": "Active owner uid or a fresh random terminal tombstone.",
+      "maxLength": 240
+    },
+    "status": {
+      "bsonType": "string",
+      "enum": ["active", "paired", "expired", "superseded", "locked"]
+    },
+    "attemptCount": { "bsonType": "int", "minimum": 0, "maximum": 6 },
+    "maxAttempts": { "bsonType": "int", "minimum": 1, "maximum": 5 },
+    "createdAtMs": { "bsonType": "long" },
+    "expiresAtMs": { "bsonType": "long" },
+    "usedAtMs": { "description": "Nullable epoch-millisecond integer stored as a long." },
+    "desktopId": { "description": "Nullable random desktop ID.", "maxLength": 64 }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "tokenm-maintenance-source",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One-time Token M unknown-delivery maintenance function source",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test test/*.test.js"
+  }
+}

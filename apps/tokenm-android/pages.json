@@ -1,0 +1,27 @@
+{
+  "pages": [
+    { "path": "pages/onboarding/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/login/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/register/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/permission/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/dashboard/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/tasks/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/desktops/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/settings/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/task-detail/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/pairing/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/notifications/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/privacy/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/about/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } },
+    { "path": "pages/background-protection/index", "style": { "navigationStyle": "custom", "backgroundColor": "#f4f7fb" } }
+  ],
+  "globalStyle": {
+    "navigationStyle": "custom",
+    "navigationBarBackgroundColor": "#f4f7fb",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f4f7fb",
+    "backgroundColorContent": "#f4f7fb",
+    "backgroundTextStyle": "dark"
+  },
+  "easycom": { "autoscan": true }
+}

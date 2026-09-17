@@ -1,0 +1,26 @@
+{
+  "bsonType": "object",
+  "description": "Random desktop records and encrypted server-side credentials.",
+  "required": ["_id", "ownerId", "name", "status", "createdAtMs", "updatedAtMs"],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": { "bsonType": "string", "maxLength": 64 },
+    "ownerId": { "bsonType": "string", "maxLength": 240 },
+    "name": { "bsonType": "string", "maxLength": 80 },
+    "status": { "bsonType": "string", "enum": ["active", "revoked"] },
+    "encryptedSecret": {
+      "description": "Active records contain only {version,iv,ciphertext,tag}; null after revocation."
+    },
+    "createdAtMs": { "bsonType": "long" },
+    "updatedAtMs": { "bsonType": "long" },
+    "revokedAtMs": { "description": "Nullable epoch-millisecond integer stored as a long." },
+    "lastSeenAtMs": { "description": "Nullable epoch-millisecond integer stored as a long." },
+    "lastEventAtMs": { "description": "Nullable epoch-millisecond integer stored as a long." }
+  }
+}

@@ -24,7 +24,13 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
-const { createClaudeWebFetch } = require('./claudeWebFetch');
+const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
+const antigravityOAuth = require('../shared/providers/antigravity/oauth');
+const {
+  createWorkbuddyLocalAuth,
+  isSupportedWorkbuddyLocalAppPlatform
+} = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
 const { createTokenMNotificationRuntime } = require('./tokenMNotificationRuntime');
 const {
@@ -45,6 +51,9 @@ const {
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
+  fetch: electronLimitsFetch()
+});
 // One transport for every widget provider call that resolves through
 // `deps.fetch` — see limitsFetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
@@ -61,46 +70,62 @@ function electronLimitsFetch() {
 function electronProviderDeps(deps = {}) {
   return { ...deps, fetch: electronLimitsFetch() };
 }
-const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting } = require('../shared/clientTracking');
-const { clientDiagnosticRoots, lookupModelPricing, normalizeHistoryIntervalMs, visibleDiagnosticRoots } = require('../shared/collector');
+const {
+  DEFAULT_CLIENTS,
+  KNOWN_CLIENTS,
+  clientsCsvForSetting,
+  normalizeClientsCsv
+} = require('../shared/clientTracking');
+const {
+  clientDiagnosticRoots,
+  lookupModelPricing,
+  normalizeHistoryIntervalMs,
+  visibleDiagnosticRoots
+} = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock
+} = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
+const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, deepseekToken, fetchClaudeLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
-const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
+const { claudeWebCookie, deepseekToken, factoryEnvApiKey, fetchClaudeLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
+const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
+const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
+  codexAccountKey,
   codexManagedAccountIdentityKey,
   codexManagedAccountMatchesIdentity,
   hashAccountKey,
   preserveCodexManagedHydrationCollisions,
   upgradeCodexManagedAccountIdentity
-} = require('../shared/codexAuth');
-const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
+} = require('../shared/providers/codex/auth');
+const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/providers/codex/login');
+const { listCodexWorkspaces, normalizeWorkspaceId } = require('../shared/providers/codex/workspaces');
 const {
-  authWithSelectedCodexWorkspace,
-  listCodexWorkspaces,
-  normalizeWorkspaceId
-} = require('../shared/codexWorkspaces');
-const {
+  codexAuthMaterialForWorkspace,
   codexAccountMatchesIdentity,
   liveCodexAuthPath,
   readCodexAuthMaterial,
   writeCodexAuthFile
-} = require('../shared/codexSystemSwitch');
+} = require('../shared/providers/codex/systemSwitch');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
   normalizePinnedClients
 } = require('./renderer/clientDisplayPreferences');
+const { normalizeRankingMetric } = require('./renderer/usageAttributionRows');
 const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./renderer/i18n');
 const {
   defaultViewDisplayPreferences,
@@ -134,11 +159,11 @@ const {
   shouldSkipAppUpdateCheck,
   updateInstallQuitPolicy
 } = require('../shared/appUpdater');
-const cursorAuth = require('../shared/cursorAuth');
-const cursorProbe = require('../shared/cursorProbe');
-const opencodeWeb = require('../shared/opencodeWeb');
-const opencodeGoApi = require('../shared/opencodeGoApi');
-const opencodeProfiles = require('../shared/opencodeProfiles');
+const cursorAuth = require('../shared/providers/cursor/auth');
+const cursorProbe = require('../shared/providers/cursor/probe');
+const opencodeWeb = require('../shared/providers/opencode/web');
+const opencodeGoApi = require('../shared/providers/opencode/goApi');
+const opencodeProfiles = require('../shared/providers/opencode/profiles');
 
 // The collector reaches the usage API behind a probe deadline; these settings
 // paths call it directly, so they need their own bound or a hung request leaves
@@ -176,8 +201,8 @@ async function probeOpenCodeApiKey(apiKey) {
     return { status: 'unavailable', windows: [] };
   }
 }
-const openrouterLimits = require('../shared/openrouterLimits');
-const thirdPartyLimits = require('../shared/thirdPartyLimits');
+const openrouterLimits = require('../shared/providers/openrouter/limits');
+const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
@@ -190,16 +215,23 @@ const {
 } = require('../shared/clientUsageArchive');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  clearSessionUsageArchive,
   normalizeSessionUsageArchive,
-  readSessionUsageArchive,
-  sessionUsageArchivePath,
-  sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  sessionUsageArchiveDate
 } = require('../shared/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot,
+  sessionUsageArchiveDatabasePath
+} = require('../shared/sessionUsageArchiveStore');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const {
+  HUB_RESPONSE_HEADER,
+  HUB_RESPONSE_MINIMAL,
+  HUB_STREAM_HEADER,
+  HUB_STREAM_VERSION,
+  applyFreshnessEvent
+} = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -207,7 +239,7 @@ const {
   createMimoManagedAccount,
   fetchMimoLimits,
   normalizeMimoCookieHeader
-} = require('../shared/mimoLimits');
+} = require('../shared/providers/mimo/limits');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -227,10 +259,8 @@ const {
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
 } = require('./macWidgetHistoryStore');
-const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { normalizeWidgetURLScheme } = require('../shared/macWidgetConfig');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
 const linuxAutostart = require('./linuxAutostart');
@@ -243,6 +273,7 @@ const {
   pickUsageTrayIconId,
   parseWindowsSystemUsesLightTheme,
   popoverBounds,
+  prepareTrayIconForPlatform,
   reconcileCodexAccountSelection,
   runTrayMenuAction,
   watchSystemDarkUi,
@@ -255,9 +286,11 @@ const {
   mainWindowCloseAction,
   normalizeTrayModeSettings,
   shouldCreateTray,
+  skipTaskbarForSettings,
   trayToggleAction
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
+const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const { classifyStreamFailure } = require('./syncConnection');
 const {
@@ -266,13 +299,22 @@ const {
   composeLocalSyncStats
 } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
+  normalizeCursorAccountIds,
+  normalizeCursorDisabledAccountIds,
+  usageConfigFingerprint,
   usageConfigFromSettings
 } = require('./runtimeConfig');
+const {
+  CUSTOM_SCAN_CLIENT_IDS,
+  customScanPathLimitError,
+  normalizeCustomScanPaths
+} = require('../shared/customScanPaths');
 const {
   canRefreshUsageRuntime,
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
@@ -280,7 +322,14 @@ const {
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
 } = require('./deviceRuntimeCoordinator');
-const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
+const {
+  describeWindowBehavior,
+  floatingAlwaysOnTopLevel,
+  normalizeWindowBehaviorSettings,
+  windowBehaviorSelection
+} = require('./windowBehavior');
+const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
+const { subscribeForegroundChange } = require('./windowsForegroundHook');
 const {
   normalizeWindowToggleShortcut,
   windowToggleShortcutAction,
@@ -310,12 +359,32 @@ const {
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
+const {
+  attachNativeMaterialVisibility,
+  syncNativeMaterialVisibility
+} = require('./nativeMaterialVisibility');
 
 if (!app.isPackaged) loadDotEnv();
 
 const APP_NAME = 'Token M';
 const LEGACY_USER_DATA_PATH = path.join(app.getPath('appData'), 'Token Monitor');
 const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+
+// Electron's own documentation says a window given no icon falls back to the
+// executable's, and recommends ICO on Windows; electron-builder already
+// converts `win.icon` into the ICO embedded in that executable, which is the
+// icon built for this platform rather than one PNG scaled at runtime. So a
+// packaged window deliberately sets
+// nothing here: whatever it set could only override that, which is exactly what
+// naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
+// (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An
+// unpackaged run has no icon of ours inside electron.exe to inherit, so it names
+// the same full-bleed artwork the installer is built from.
+function appWindowIcon() {
+  if (process.platform !== 'win32') return { icon: APP_ICON_PATH };
+  return app.isPackaged ? {} : { icon: WINDOWS_APP_ICON_PATH };
+}
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
@@ -332,7 +401,7 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -351,15 +420,20 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
+let mainWindowNativeBlurEnabled = false;
 let dashboardWindow = null;
+let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
+let initialLimitProvidersPending = false;
 let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let tokenMNotificationRuntime = null;
 let credentialStorageErrorShown = false;
+let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
+const sessionUsageArchiveStore = createSessionUsageArchiveStore();
 let lastSessionUsageArchiveUpdate = {
   at: null,
   durationMs: null,
@@ -367,13 +441,15 @@ let lastSessionUsageArchiveUpdate = {
 };
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
+const codexResetForecastClient = createCodexResetForecastClient({
+  fetchImpl: electronLimitsFetch()
+});
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
 const diagnosticJournal = createDiagnosticJournal();
 const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
-// productName is now Token M, but changing Electron's default userData folder
-// would make existing settings and credentials appear to vanish. Pin the old
-// location before changing the visible app name.
+// Keep the established data directory while changing only the visible product
+// name. Existing settings, credentials, history, and outbox state remain local.
 app.setPath('userData', LEGACY_USER_DATA_PATH);
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
@@ -395,16 +471,6 @@ function normalizeHomeLimitAccountCount(value) {
   return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
 }
 
-let pendingMacWidgetOpen = null;
-app.on('open-url', (event, url) => {
-  const urlScheme = macWidgetConfiguration()?.urlScheme || 'token-monitor';
-  const destination = parseMacWidgetDeepLink(url, urlScheme);
-  if (!destination) return;
-  event.preventDefault();
-  pendingMacWidgetOpen = destination;
-  if (app.isReady()) setImmediate(openMainWindowFromWidget);
-});
-
 function defaultSettings() {
   const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
   const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
@@ -420,6 +486,7 @@ function defaultSettings() {
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
+    keepAboveTaskbar: false,
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
@@ -430,9 +497,12 @@ function defaultSettings() {
     showToolIcons: true,
     titleIconOnly: true,
     showCompactTotalTokens: false,
+    showLiveTokenRate: false,
+    liveTokenRateScope: 'all',
     compactTokenUnits: 'western',
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
+    modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
     periodMonthMode: 'month',
     themeColors: {},
@@ -449,6 +519,7 @@ function defaultSettings() {
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
+    customScanPaths: {},
     clientDisplayOrder: '',
     hiddenClients: '',
     pinnedClients: '',
@@ -458,7 +529,7 @@ function defaultSettings() {
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
     showHomeLimitProviderNames: false,
-    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
+    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
@@ -475,6 +546,8 @@ function defaultSettings() {
     archivedClientUsage: { version: 1, clients: {} },
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
+    modelAliases: {},
+    modelAliasGrouping: 'off',
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -483,6 +556,8 @@ function defaultSettings() {
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
+    cursorDisabledAccountIds: [],
+    cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -491,6 +566,10 @@ function defaultSettings() {
     // the user does not want reported.
     opencodeAmbientEnabled: parseBoolean(process.env.TOKEN_MONITOR_OPENCODE_AMBIENT, true),
     opencodeLocalLimitsEnabled: false,
+    // Third-party global reset predictions are opt-in and remain separate from
+    // the account-specific limits wire shape.
+    codexResetForecastEnabled: false,
+    showCodexAdditionalLimits: true,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     // Manual subscription metadata. Plain preferences, not credentials, so they
     // live in settings.json and cross to the renderer unredacted.
@@ -507,6 +586,7 @@ function defaultSettings() {
     zoomFactor: 1,
     showTrayIcon: true,
     trayMode: false,
+    hideAppIcon: false,
     trayContent: 'tokens',
     trayCustomLayout: createDefaultTrayLayout(),
     showTrayProviderBadge: false,
@@ -517,12 +597,12 @@ function defaultSettings() {
     automaticAppUpdates: false,
     language: 'auto',
     tokenMCodexHookEnabled: false,
-    tokenMWeChatApiUrl: String(process.env.TOKEN_M_WECHAT_API_URL || '').trim(),
-    tokenMWeChatDesktopId: '',
-    tokenMWeChatDesktopName: '',
-    tokenMWeChatEnabled: false,
-    tokenMWeChatPrivacyMode: true,
-    tokenMWeChatCredential: '',
+    tokenMAndroidApiUrl: String(process.env.TOKEN_M_ANDROID_API_URL || '').trim(),
+    tokenMAndroidDesktopId: '',
+    tokenMAndroidDesktopName: '',
+    tokenMAndroidEnabled: false,
+    tokenMAndroidPrivacyMode: true,
+    tokenMAndroidCredential: '',
     claudeWebCookie: '',
     opencodeCookie: '',
     opencodeProfiles: {},
@@ -532,6 +612,7 @@ function defaultSettings() {
     minimaxApiKey: '',
     copilotApiToken: '',
     copilotEnterpriseHost: '',
+    factoryApiKey: '',
     zaiApiKey: '',
     zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
     zaiTeamApiKey: '',
@@ -540,13 +621,26 @@ function defaultSettings() {
     volcengineAccessKeyId: '',
     volcengineSecretAccessKey: '',
     volcengineRegion: '',
+    volcengineAgentAccessKeyId: '',
+    volcengineAgentSecretAccessKey: '',
+    volcengineAgentRegion: '',
+    alibabaCookie: '',
+    // Empty, not 'cn': defaults are merged into settings before any read, so a
+    // concrete value here would satisfy the `options || env` fallback and make
+    // ALIBABA_TOKEN_PLAN_VARIANT unreachable in both the UI and the collector.
+    // The effective variant is resolved at use, never stored eagerly.
+    alibabaVariant: '',
     qoderCookie: '',
     qoderSite: 'global',
+    traeAccessToken: '',
+    traeDeviceId: '',
+    zedCookie: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
     ollamaCookie: '',
     codexManagedAccounts: [],
+    antigravityManagedAccounts: [],
     mimoManagedAccounts: [],
     appUpdate: {
       lastCheckedAt: null,
@@ -568,6 +662,10 @@ function normalizeCollectionMode(value, fallback = 'live') {
 // the framing, and neither costs an extra scan.
 function normalizeTokenRateMode(value) {
   return value === 'burn' ? 'burn' : 'speed';
+}
+
+function normalizeLiveTokenRateScope(value) {
+  return value === 'device' ? 'device' : 'all';
 }
 
 function normalizeHeatmapMetric(value, fallback = 'cost') {
@@ -641,10 +739,19 @@ function electronUsageConfig(errorPrefix) {
 }
 
 function electronLimitsConfig() {
+  const workbuddyEnabled = settings?.limitsEnabled !== false
+    && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
+  const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform();
+  const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
   return limitsConfigFromSettings(settings, {
     env: process.env,
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionSupported,
+    workbuddyDesktopSessionEnabled,
+    workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
     defaultLimitProviders: defaultLimitProviders(),
     codexManagedAccounts: codexManagedAccountsForCollector(),
+    antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
   });
 }
@@ -694,8 +801,19 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     claudeWebFetch: electronClaudeWebFetch,
+    workbuddyFetch: async (url, init = {}, expectedSession = null) => {
+      const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
+      return {
+        status: result.status,
+        ok: result.ok,
+        json: () => result.json()
+      };
+    },
     resolveConfigSnapshot: () => electronLimitsConfig(),
-    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal
+    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
+    onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
+    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
   };
 }
 
@@ -723,6 +841,28 @@ function currentCopilotApiToken() {
   return settings?.copilotApiToken || copilotToken(process.env);
 }
 
+function normalizeFactoryApiKey(value) {
+  return normalizeSecretSetting(value);
+}
+
+function currentFactoryApiKey() {
+  return settings?.factoryApiKey || factoryEnvApiKey({}, { env: process.env });
+}
+
+async function validateFactoryApiKey(raw, deps = {}) {
+  const apiKey = (deps.normalizeApiKey || normalizeFactoryApiKey)(raw);
+  if (!apiKey) return { ok: false, status: 'notConfigured' };
+  try {
+    const provider = await (deps.fetchLimits || fetchFactoryLimits)(
+      { factoryApiKey: apiKey },
+      deps.providerDeps || electronProviderDeps()
+    );
+    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
+  } catch (error) {
+    return { ok: false, status: error?.status || 'unavailable' };
+  }
+}
+
 function normalizeSecretSetting(value) {
   let raw = String(value || '').trim();
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
@@ -741,6 +881,15 @@ function normalizeZaiApiRegion(value) {
 
 function currentZaiApiKey() {
   return settings?.zaiApiKey || zaiToken(process.env);
+}
+
+// A locally logged-in ZCode install is a credential source for the GLM lane
+// even when no console key was entered. Reads up to four small JSON files
+// synchronously; settingsForRenderer renders at human interaction speed, so
+// the cost is bounded by how often that runs, not by any refresh loop.
+function currentZcodeAutoCredential() {
+  const discovery = discoverZcodeConnection();
+  return discovery.entitled && discovery.credential ? discovery : null;
 }
 
 function normalizeZaiTeamApiKey(value) {
@@ -768,6 +917,21 @@ function normalizeQoderCookie(value) {
   return qoderCookie({}, { qoderCookie: String(value || '') });
 }
 
+function normalizeAlibabaCookie(value) {
+  return normalizeAlibabaCookieHeader(String(value || ''));
+}
+
+function normalizeAlibabaVariant(value) {
+  // Env is consulted here, not just in the collector: resolving it in only one
+  // of the two leaves the settings UI showing a different console than the one
+  // the quota request actually goes to.
+  return alibabaVariant({ alibabaVariant: value }, process.env);
+}
+
+function currentAlibabaCookie() {
+  return settings?.alibabaCookie || alibabaCookie(process.env);
+}
+
 function normalizeQoderSite(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
@@ -776,6 +940,26 @@ function normalizeQoderSite(value) {
 
 function currentQoderCookie() {
   return settings?.qoderCookie || qoderCookie(process.env);
+}
+
+function normalizeTraeAccessToken(value) {
+  return traeAccessToken({}, { traeAccessToken: String(value || '') });
+}
+
+function normalizeTraeDeviceId(value) {
+  return traeDeviceId({}, { traeDeviceId: String(value || '') });
+}
+
+function currentTraeAccessToken() {
+  return settings?.traeAccessToken || traeAccessToken(process.env);
+}
+
+function normalizeZedCookie(value) {
+  return zedCookie({}, { zedCookie: String(value || '') });
+}
+
+function currentZedCookie() {
+  return settings?.zedCookie || zedCookie(process.env);
 }
 
 function normalizeCommandcodeCookie(value) {
@@ -951,18 +1135,18 @@ function hydrateCodexManagedWorkspaceLabels() {
     let changed = false;
     const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
       const resolved = labels.get(account.id);
-      if (
-        !resolved
-        || account.workspaceLabel
-        || account.workspaceKind
-        || account.enabled === false
-        || account.workspaceAccountId !== resolved.workspaceAccountId
-      ) return account;
+      if (!resolved || account.enabled === false || account.workspaceAccountId !== resolved.workspaceAccountId) {
+        return account;
+      }
+      const shouldHydrateLabel = !account.workspaceLabel && !account.workspaceKind;
+      if (!shouldHydrateLabel) return account;
       changed = true;
       return {
         ...account,
-        workspaceLabel: resolved.label,
-        workspaceKind: resolved.workspaceKind,
+        ...(shouldHydrateLabel ? {
+          workspaceLabel: resolved.label,
+          workspaceKind: resolved.workspaceKind
+        } : {}),
         updatedAt: new Date().toISOString()
       };
     });
@@ -999,6 +1183,168 @@ function codexAccountsForRenderer() {
 
 function codexManagedAccountsForCollector() {
   return normalizeCodexManagedAccounts(settings?.codexManagedAccounts);
+}
+
+function normalizeAntigravityManagedAccounts(value) {
+  return antigravityOAuth.normalizeManagedAccounts(value);
+}
+
+function antigravityAccountsForRenderer() {
+  return normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+}
+
+function readAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().readAntigravityCredential(id);
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeAntigravityCredential(id, credentials) {
+  try {
+    return ensureCredentialStore().writeAntigravityCredential(id, credentials);
+  } catch (_) {
+    return false;
+  }
+}
+
+function removeAntigravityCredential(id) {
+  try {
+    return ensureCredentialStore().removeAntigravityCredential(id);
+  } catch (_) {
+    return false;
+  }
+}
+
+function antigravityManagedAccountsForCollector() {
+  return antigravityOAuth.managedAccountsForCollector(
+    settings?.antigravityManagedAccounts,
+    readAntigravityCredential
+  );
+}
+
+function persistAntigravityCredentialsRenewal({ account, credentials, previous } = {}) {
+  const accountId = String(account?.id || '').trim();
+  if (!accountId || !credentials || typeof credentials !== 'object') return false;
+  const current = readAntigravityCredential(accountId);
+  if (!current || JSON.stringify(current) !== JSON.stringify(previous || {})) return false;
+  return writeAntigravityCredential(accountId, credentials);
+}
+
+async function addAntigravityManagedAccount() {
+  if (antigravityOAuthLoginController) return { ok: false, errorCode: 'loginInProgress' };
+  const controller = new AbortController();
+  antigravityOAuthLoginController = controller;
+  try {
+    const { credential, identity } = await runAntigravityOAuthLogin({
+      env: process.env,
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      signal: controller.signal,
+      logger: (message) => console.log(`[antigravity-oauth] ${message}`)
+    });
+    const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+    const now = new Date().toISOString();
+    const existing = accounts.find((account) => account.accountEmail === identity.email);
+    const account = {
+      id: existing?.id || `antigravity-${crypto.randomUUID()}`,
+      accountKey: antigravityOAuth.accountKey(identity.email),
+      accountEmail: identity.email,
+      accountLabel: existing?.accountLabel || identity.name || '',
+      enabled: true,
+      addedAt: existing?.addedAt || now,
+      updatedAt: now
+    };
+    const previousCredential = existing ? readAntigravityCredential(existing.id) : null;
+    if (!writeAntigravityCredential(account.id, {
+      ...credential,
+      refreshToken: credential.refreshToken || previousCredential?.refreshToken || ''
+    })) {
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    settings.antigravityManagedAccounts = normalizeAntigravityManagedAccounts([
+      ...accounts.filter((entry) => entry.id !== account.id && entry.accountEmail !== account.accountEmail),
+      account
+    ]);
+    try {
+      saveSettings({ throwOnError: true });
+    } catch (_) {
+      if (previousCredential) writeAntigravityCredential(account.id, previousCredential);
+      else removeAntigravityCredential(account.id);
+      return { ok: false, errorCode: 'credentialStorageUnavailable' };
+    }
+    pushSettingsToRenderer();
+    sendAntigravityAccountsPush();
+    void queueLimitInvalidation({
+      provider: 'antigravity',
+      accountId: account.id,
+      accountKey: account.accountKey,
+      accountEmail: account.accountEmail,
+      sourceDetail: 'oauth'
+    }, 'account-added');
+    return { ok: true, accounts: antigravityAccountsForRenderer() };
+  } catch (error) {
+    const cancelled = controller.signal.aborted || error?.code === 'CANCELLED' || error?.name === 'AbortError';
+    return {
+      ok: false,
+      errorCode: cancelled ? 'cancelled' : error?.code || 'loginFailed',
+      error: cancelled ? '' : String(error?.message || error)
+    };
+  } finally {
+    if (antigravityOAuthLoginController === controller) antigravityOAuthLoginController = null;
+  }
+}
+
+function cancelAntigravityManagedAccountLogin() {
+  if (!antigravityOAuthLoginController) return false;
+  antigravityOAuthLoginController.abort();
+  return true;
+}
+
+async function removeAntigravityManagedAccount(id) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  const previousCredential = readAntigravityCredential(accountId);
+  if (!removeAntigravityCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
+  settings.antigravityManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    if (previousCredential) writeAntigravityCredential(accountId, previousCredential);
+    return { ok: false, error: 'Could not persist account removal' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-removed', {
+    clear: true,
+    refresh: false
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
+}
+
+function setAntigravityManagedAccountEnabled(id, enabled) {
+  const accountId = String(id || '').trim();
+  const accounts = normalizeAntigravityManagedAccounts(settings?.antigravityManagedAccounts);
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return { ok: false, error: 'Account not found' };
+  account.enabled = Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  settings.antigravityManagedAccounts = accounts;
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    return { ok: false, error: 'Could not persist account state' };
+  }
+  pushSettingsToRenderer();
+  sendAntigravityAccountsPush();
+  void queueLimitInvalidation({ provider: 'antigravity', accountId, accountKey: account.accountKey }, 'account-state', {
+    clear: !account.enabled,
+    refresh: account.enabled
+  });
+  return { ok: true, accounts: antigravityAccountsForRenderer() };
 }
 
 function normalizeMimoManagedAccounts(value) {
@@ -1301,7 +1647,7 @@ async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) 
   if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
 }
 
-async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
+async function resolveCodexWorkspaceAfterLogin(auth, _homePath, options = {}) {
   const initialIdentity = codexAuthIdentity(auth);
   let workspaces;
   try {
@@ -1335,15 +1681,14 @@ async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
   }
   if (!selected) return { auth, identity: initialIdentity };
 
-  const selectedAuth = authWithSelectedCodexWorkspace(auth, selected.id);
-  await writeCodexAuthFile(
-    path.join(homePath, 'auth.json'),
-    `${JSON.stringify(selectedAuth, null, 2)}\n`
-  );
+  const workspaceAccountId = normalizeWorkspaceId(selected.id);
   return {
-    auth: selectedAuth,
+    auth,
     identity: {
-      ...codexAuthIdentity(selectedAuth),
+      ...initialIdentity,
+      providerAccountId: workspaceAccountId,
+      workspaceAccountId,
+      accountKey: codexAccountKey(initialIdentity.email, workspaceAccountId),
       workspaceLabel: selected.label,
       workspaceKind: selected.workspaceKind
     }
@@ -1505,6 +1850,17 @@ async function switchCodexSystemAccount(id) {
   if (!hasCodexIdentity(targetMaterial.identity)) {
     return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
   }
+  let selectedMaterial;
+  try {
+    selectedMaterial = codexAuthMaterialForWorkspace(targetMaterial, account.workspaceAccountId);
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Could not prepare the selected Codex workspace.' };
+  }
+  const targetIdentity = {
+    ...selectedMaterial.identity,
+    workspaceLabel: account.workspaceLabel,
+    workspaceKind: account.workspaceKind
+  };
 
   const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
   const liveAuthPath = liveCodexAuthPath(process.env);
@@ -1516,16 +1872,16 @@ async function switchCodexSystemAccount(id) {
   }
   let preservedLiveAccount = null;
   try {
-    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
-    await writeCodexAuthFile(liveAuthPath, targetMaterial.data);
+    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetIdentity);
+    await writeCodexAuthFile(liveAuthPath, selectedMaterial.data);
     const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
     const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
-    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
+    commitCodexManagedAccount(targetIdentity, refreshed.homePath, refreshed, {
       enabled: refreshed.enabled !== false,
       restart: false
     });
     void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
-    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
+    const activeAccountId = codexAccountId(targetIdentity, refreshed);
     const accountsForRenderer = codexAccountsForRenderer();
     return {
       ok: true,
@@ -1609,9 +1965,21 @@ function normalizeHiddenLimitProviders(value) {
 
 function migrateClientDisplayOrder(value) {
   const known = new Set(KNOWN_CLIENTS.split(','));
-  const raw = Array.isArray(value) ? value : String(value || '').split(',');
-  const hasKnownClient = raw.some((item) => known.has(String(item || '').trim().toLowerCase()));
-  return hasKnownClient ? normalizeClientDisplayOrder(value, KNOWN_CLIENT_LIST).join(',') : '';
+  const migrated = normalizeClientsCsv(value);
+  const hasKnownClient = migrated.split(',').some((item) => known.has(item));
+  return hasKnownClient ? normalizeClientDisplayOrder(migrated, KNOWN_CLIENT_LIST).join(',') : '';
+}
+
+function migrateClientSelection(value, normalizeSelection) {
+  return normalizeSelection(normalizeClientsCsv(value), KNOWN_CLIENT_LIST);
+}
+
+function migrateVendorColors(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const colors = { ...value };
+  if (colors.kilo === undefined && colors.kilocode !== undefined) colors.kilo = colors.kilocode;
+  delete colors.kilocode;
+  return colors;
 }
 
 const SERVICE_STATUS_REFRESH_VALUES = new Set([0, 60000, 120000, 300000, 900000, 1800000]);
@@ -1627,9 +1995,9 @@ function migrateViewDisplayOrder(value) {
   return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
 }
 
-function normalizeTrayContent(value, fallback = 'tokens') {
+function normalizeTrayContent(value, fallback = 'tokens', allowedValues = TRAY_CONTENT_VALUES) {
   const v = String(value || '').trim();
-  return TRAY_CONTENT_VALUES.has(v) ? v : fallback;
+  return allowedValues.has(v) ? v : fallback;
 }
 
 function normalizeHubMode(value, fallback = 'local') {
@@ -1740,6 +2108,11 @@ function sendFloatingBubbleState() {
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
 }
 
+function sendMainWindowVisibility(win = mainWindow) {
+  if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+}
+
 function stopFloatingBubbleAutoCollapseTimer() {
   if (floatingBubbleAutoCollapseTimer) clearTimeout(floatingBubbleAutoCollapseTimer);
   floatingBubbleAutoCollapseTimer = null;
@@ -1764,8 +2137,9 @@ function applyCollapsedFloatingBubbleLimits(bounds) {
     mainWindow.setMaximumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
   }
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
-  mainWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating');
+  mainWindow.setAlwaysOnTop(true, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+  syncTaskbarZOrder();
 }
 
 function displayForBounds(bounds) {
@@ -2062,6 +2436,7 @@ function migrateLegacyMimoCredentialFiles(accounts) {
 
 function readSettings() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  const settingsFileExisted = fs.existsSync(settingsPath);
   try {
     const defaults = defaultSettings();
     let saved = {};
@@ -2079,7 +2454,20 @@ function readSettings() {
     }
     const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
-    const merged = { ...defaults, ...saved, ...storedCredentials };
+    // Only recognized Token M settings may cross the historical settings file
+    // boundary. This keeps retired legacy keys inert while retaining the
+    // current Android notification overlay fields.
+    const currentSaved = Object.fromEntries(
+      Object.entries(saved).filter(([key]) => !key.startsWith('tokenM') || Object.hasOwn(defaults, key))
+    );
+    const merged = { ...defaults, ...currentSaved, ...storedCredentials };
+    merged.clients = clientsCsvForSetting(merged.clients);
+    merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
+    // A missing settings file is the only reliable fresh-install signal: a
+    // missing limitProviders field also occurs when an existing installation
+    // upgrades, where changing the user's effective defaults would be wrong.
+    initialLimitProvidersPending = !settingsFileExisted
+      && process.env.TOKEN_MONITOR_LIMIT_PROVIDERS === undefined;
     // Migrate older configs that predate hubMode: infer from hubUrl.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -2094,10 +2482,10 @@ function readSettings() {
       merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
     }
     if (saved.hiddenClients !== undefined) {
-      merged.hiddenClients = normalizeHiddenClients(saved.hiddenClients, KNOWN_CLIENT_LIST);
+      merged.hiddenClients = migrateClientSelection(saved.hiddenClients, normalizeHiddenClients);
     }
     if (saved.pinnedClients !== undefined) {
-      merged.pinnedClients = normalizePinnedClients(saved.pinnedClients, KNOWN_CLIENT_LIST);
+      merged.pinnedClients = migrateClientSelection(saved.pinnedClients, normalizePinnedClients);
     }
     if (saved.viewDisplayOrder !== undefined) {
       merged.viewDisplayOrder = migrateViewDisplayOrder(saved.viewDisplayOrder);
@@ -2113,9 +2501,18 @@ function readSettings() {
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
+    merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
+    delete merged.workbuddyLocalAppEnabled;
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
+    merged.tokenMCodexHookEnabled = parseBoolean(merged.tokenMCodexHookEnabled, false);
+    merged.tokenMAndroidEnabled = parseBoolean(merged.tokenMAndroidEnabled, false);
+    merged.tokenMAndroidPrivacyMode = parseBoolean(merged.tokenMAndroidPrivacyMode, true);
+    merged.tokenMAndroidApiUrl = typeof merged.tokenMAndroidApiUrl === 'string' ? merged.tokenMAndroidApiUrl.trim() : '';
+    merged.tokenMAndroidDesktopId = typeof merged.tokenMAndroidDesktopId === 'string' ? merged.tokenMAndroidDesktopId.trim() : '';
+    merged.tokenMAndroidDesktopName = typeof merged.tokenMAndroidDesktopName === 'string' ? merged.tokenMAndroidDesktopName.trim().slice(0, 80) : '';
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
@@ -2140,9 +2537,14 @@ function readSettings() {
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
+    merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
+    merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -2156,7 +2558,11 @@ function readSettings() {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
     merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
     merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    if (saved.keepAboveTaskbar !== undefined) {
+      merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
+    }
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -2167,8 +2573,12 @@ function readSettings() {
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
+    merged.vendorColors = migrateVendorColors(merged.vendorColors);
+    merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
+    merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
@@ -2220,12 +2630,12 @@ function saveSettings(options = {}) {
 async function commitTokenMNotificationSettings(patch) {
   settings = { ...settings, ...(patch || {}) };
   saveSettings({ throwOnError: true });
+  pushSettingsToRenderer();
   return settings;
 }
 
 function emitTokenMNotificationStatus(status) {
-  const contents = mainWindow?.webContents;
-  sendWhenRendererReady(contents, 'notifications:status', status);
+  sendWhenRendererReady(mainWindow?.webContents, 'notifications:status', status);
 }
 
 function ensureTokenMNotificationRuntime() {
@@ -2241,6 +2651,19 @@ function ensureTokenMNotificationRuntime() {
     }
   });
   return tokenMNotificationRuntime;
+}
+
+function seedInitialLimitProviders(summary) {
+  return applyInitialLimitProviderSeed(initialLimitProvidersPending, summary, {
+    settings,
+    saveSettings,
+    onPersisted() {
+      // Consume the one-shot seed before reconfiguration can publish again.
+      initialLimitProvidersPending = false;
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+    }
+  });
 }
 
 function loginItemEnabledHere() {
@@ -2306,7 +2729,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
 function ensureSessionUsageArchiveLoaded() {
   if (sessionUsageArchive) return sessionUsageArchive;
   try {
-    sessionUsageArchive = readSessionUsageArchive();
+    // The headless agent owns migration and pruning while its PID is active.
+    // Anchor projection must not turn Electron into a second archive writer.
+    sessionUsageArchive = isExternalAgentActive()
+      ? readSessionUsageArchiveSnapshot()
+      : sessionUsageArchiveStore.read();
   } catch (error) {
     console.log(`[session-archive] read failed: ${error.message}`);
     sessionUsageArchive = normalizeSessionUsageArchive({});
@@ -2323,23 +2750,18 @@ function updateSessionUsageArchive(summary, now) {
       failureCode
     };
   };
-  const previous = ensureSessionUsageArchiveLoaded();
-  const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) {
-    finish();
-    return previous;
-  }
   try {
-    writeSessionUsageArchive(next);
-    sessionUsageArchive = next;
+    const result = sessionUsageArchiveStore.capture(summary, now);
+    sessionUsageArchive = result.archive;
+    if (result.error) throw result.error;
   } catch (error) {
     finish('archive-write-failed');
     diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
     console.log(`[session-archive] write failed: ${error.message}`);
-    return next;
+    return sessionUsageArchive || ensureSessionUsageArchiveLoaded();
   }
   finish();
-  return next;
+  return sessionUsageArchive;
 }
 
 // Read-only projection of both archives onto a summary. Un-tracked clients and
@@ -2353,7 +2775,12 @@ function summaryWithArchivesApplied(summary, sessionArchive, now) {
   });
   const visibleSummary = settings?.sessionUsageArchiveEnabled === false
     ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+    : applySessionUsageArchive(withArchivedClients, sessionArchive, {
+        now,
+        canonical: true,
+        canonicalSummary: true,
+        mutate: true
+      });
   return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 
@@ -2361,8 +2788,13 @@ function summaryWithArchivedClientUsage(summary) {
   const now = sessionUsageArchiveDate(summary);
   if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
   if (isExternalAgentActive()) {
-    sessionUsageArchive = null;
-    return summaryWithArchivesApplied(summary, ensureSessionUsageArchiveLoaded(), now);
+    try {
+      sessionUsageArchive = sessionUsageArchiveStore.refresh(now);
+    } catch (error) {
+      console.log(`[session-archive] refresh failed: ${error.message}`);
+      sessionUsageArchive = sessionUsageArchive || normalizeSessionUsageArchive({});
+    }
+    return summaryWithArchivesApplied(summary, sessionUsageArchive, now);
   }
   return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
 }
@@ -2398,7 +2830,15 @@ function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
     }
   } else {
     if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
-      mainWindow.setVisibleOnAllWorkspaces(false);
+      // skipTransformProcessType is not just a flicker optimisation here. Left
+      // at its default, Electron transforms the process back to a foreground
+      // app on this call, which re-shows the Dock icon and silently undoes the
+      // accessory policy hideAppIcon depends on. The invariant that makes
+      // skipping safe is that applyMacActivationPolicy() is the only thing that
+      // decides the process type and has already run on every path into here —
+      // enumerating those paths is what rots, so anything new that reaches this
+      // function has to apply the policy first rather than be added to a list.
+      mainWindow.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
     }
     if (typeof mainWindow.setHiddenInMissionControl === 'function') {
       mainWindow.setHiddenInMissionControl(false);
@@ -2409,6 +2849,44 @@ function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
   }
 }
 
+// Windows re-raises its taskbar over an always-on-top widget that overlaps it
+// and gives us no event for the common case, so keeping the widget above it
+// costs a timer and can briefly flicker during some app switches. That price
+// only makes sense for someone who deliberately parked the widget on the
+// taskbar, which is why it is opt-in. windowsTaskbarZOrder.js explains the
+// mechanics. Everything that can change whether the widget still overlaps the
+// taskbar — or is still on top, or still visible — calls this, and the keeper
+// decides for itself.
+let taskbarZOrderKeeper = null;
+
+function stopTaskbarZOrderKeeper() {
+  if (taskbarZOrderKeeper) taskbarZOrderKeeper.stop();
+}
+
+function syncTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings)) {
+    stopTaskbarZOrderKeeper();
+    return;
+  }
+  if (!taskbarZOrderKeeper) {
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({
+      screen,
+      subscribeForeground: subscribeForegroundChange,
+      log: process.env.TOKEN_MONITOR_TASKBAR_ZORDER_DEBUG === '1'
+        ? (message) => console.log(`[taskbar-zorder ${Date.now() % 100000}] ${message}`)
+        : null
+    });
+  }
+  taskbarZOrderKeeper.sync(mainWindow);
+}
+
+// Losing activation to the taskbar is the one transition Windows raises it on
+// that reaches us as an event, so it gets the fast path.
+function nudgeTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings) || !taskbarZOrderKeeper) return;
+  taskbarZOrderKeeper.nudge(mainWindow);
+}
+
 function applyWindowSettings() {
   if (!mainWindow) return;
   if (floatingBubbleState.collapsed) {
@@ -2416,37 +2894,34 @@ function applyWindowSettings() {
     return;
   }
   const behavior = describeWindowBehavior(settings);
-  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, 'floating');
+  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
   if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable);
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable);
   if (typeof mainWindow.setIgnoreMouseEvents === 'function') {
     mainWindow.setIgnoreMouseEvents(behavior.mousePassthrough);
   }
   if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
-  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(Boolean(settings?.trayMode));
+  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
   if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  syncTaskbarZOrder();
 }
 
 function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
-function keepNativeBlurActive() {
-  if (!mainWindow) return;
-  if (!nativeBlurEnabled()) return;
-  if (process.platform === 'darwin' && typeof mainWindow.setVisualEffectState === 'function') {
-    mainWindow.setVisualEffectState('active');
-  }
-}
-
 function applyNativeMaterial(source = settings) {
-  if (!mainWindow) return;
   const enabled = nativeBlurEnabled(source);
-  if (process.platform === 'darwin' && typeof mainWindow.setVibrancy === 'function') {
-    mainWindow.setVibrancy(enabled ? 'hud' : null);
-    if (typeof mainWindow.setVisualEffectState === 'function') {
-      mainWindow.setVisualEffectState(enabled ? 'active' : 'inactive');
-    }
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindowNativeBlurEnabled !== enabled) {
+    mainWindowNativeBlurEnabled = enabled;
+    syncNativeMaterialVisibility(mainWindow, enabled);
+  }
+  // This also runs for every appearance slider preview and floating-bubble
+  // transition, so re-applying an unchanged material would rebuild its native
+  // effect view for nothing.
+  if (dashboardWindow && !dashboardWindow.isDestroyed() && dashboardWindowNativeBlurEnabled !== enabled) {
+    dashboardWindowNativeBlurEnabled = enabled;
+    syncNativeMaterialVisibility(dashboardWindow, enabled);
   }
   // Windows: backgroundMaterial is locked in at window creation. setBackgroundMaterial('none')
   // does not restore layered-window transparency once DWM SystemBackdrop has been engaged,
@@ -2464,6 +2939,19 @@ function withHistoryPreview(stats, devices) {
 
 let mode = 'idle';
 let deviceRuntimeHandle = null;
+const USAGE_RECONFIGURE_SETTLE_MS = 750;
+const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
+const usageRuntimeReconciler = createLatestWinsReconciler({
+  delayMs: USAGE_RECONFIGURE_SETTLE_MS,
+  retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
+  apply: () => applyUsageRuntimeForMode(),
+  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`),
+  onExhausted: ({ attempts }) => recordDiagnosticEvent({
+    subsystem: 'usage-runtime',
+    code: 'usage-reconfigure-exhausted',
+    attempts
+  })
+});
 let localDevice = null;
 let localStats = null;
 let sseAbortController = null;
@@ -2488,11 +2976,11 @@ let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
 function electronPresentationStats(stats) {
-  return projectLimitStatsForDisplay(stats, {
+  return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  });
+  }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
 let trayCodexPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -2631,7 +3119,7 @@ const diagnosticReportGenerator = createDiagnosticReportGenerator({
   getArchiveFileStat: async () => {
     if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
     try {
-      const stat = await fs.promises.stat(sessionUsageArchivePath());
+      const stat = await fs.promises.stat(sessionUsageArchiveDatabasePath());
       return { ok: true, stat };
     } catch (error) {
       return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
@@ -2849,7 +3337,11 @@ async function postToHub(summary) {
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.log(`[sync] ${message}`)
   });
@@ -3370,6 +3862,8 @@ async function saveSubscriptions(list, base) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopSyncCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
@@ -3385,6 +3879,7 @@ function startSyncCollector() {
   });
   const sink = {
     async enqueue(summary, revision) {
+      seedInitialLimitProviders(summary);
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = {
         ...summary,
@@ -3401,18 +3896,20 @@ function startSyncCollector() {
     flush: () => syncUploadScheduler.flush(),
     stop: () => syncUploadScheduler.stop()
   };
+  const usageOptions = electronUsageConfig('sync-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('sync-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3423,6 +3920,7 @@ function startHostCollector() {
   stopSyncCollector();
   const sink = {
     enqueue(summary) {
+      seedInitialLimitProviders(summary);
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -3446,18 +3944,20 @@ function startHostCollector() {
       }
     }
   };
+  const usageOptions = electronUsageConfig('host-collector');
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('host-collector'),
+    usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -3530,7 +4030,6 @@ function macWidgetConfiguration() {
   if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
 
   let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
-  let urlScheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
   let snapshotFileName = 'snapshot.json';
   let widgetKind = DEFAULT_WIDGET_KIND;
   const configCandidates = [
@@ -3542,7 +4041,6 @@ function macWidgetConfiguration() {
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         appGroup = String(config.appGroup || '').trim();
-        urlScheme = String(config.urlScheme || urlScheme).trim();
         widgetKind = String(config.widgetKind || widgetKind).trim();
         snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
         if (appGroup) break;
@@ -3551,8 +4049,8 @@ function macWidgetConfiguration() {
   }
   const snapshotPath = resolveMacWidgetSnapshotPath({
     appGroup,
-    home: app.getPath('home'),
-    snapshotFileName
+    snapshotFileName,
+    logger: (message) => console.warn(message)
   });
   if (!snapshotPath) {
     cachedMacWidgetConfiguration = null;
@@ -3561,10 +4059,7 @@ function macWidgetConfiguration() {
   cachedMacWidgetConfiguration = {
     appGroup,
     snapshotPath,
-    widgetKind,
-    urlScheme: (() => {
-      try { return normalizeWidgetURLScheme(urlScheme); } catch (_) { return 'token-monitor'; }
-    })()
+    widgetKind
   };
   return cachedMacWidgetConfiguration;
 }
@@ -3606,6 +4101,15 @@ function macWidgetPresentation() {
     showCost: true,
     locale: settings?.language,
     theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+  });
+}
+
+function macWidgetActiveCodexAccount() {
+  const provider = localLiveCodexProvider(latestStats, settings?.deviceId || '');
+  if (!provider) return null;
+  return Object.freeze({
+    accountKey: String(provider.accountKey || '').trim(),
+    accountEmail: String(provider.accountEmail || '').trim()
   });
 }
 
@@ -3655,7 +4159,10 @@ function captureMacWidgetWork({ stats, owner }) {
     historyCachePath: completeHistorySource(resolverConfig) === 'remote'
       ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
       : null,
+    activeCodexAccount: macWidgetActiveCodexAccount(),
     presentation: macWidgetPresentation(),
+    modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
+    modelAliasGrouping: normalizeModelAliasGrouping(settings?.modelAliasGrouping),
     snapshotPath: widget.snapshotPath,
     widgetKind: widget.widgetKind
   };
@@ -3691,8 +4198,9 @@ function ensureMacWidgetSnapshotController() {
     prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
       snapshotPath: work.snapshotPath,
       snapshotOptions: {
+        activeCodexAccount: work.activeCodexAccount,
         presentation: work.presentation,
-        history
+        history: projectModelAliasHistory(history, work.modelAliases, { grouping: work.modelAliasGrouping })
       },
       logger: (message) => console.warn(message)
     }),
@@ -3865,7 +4373,8 @@ function updateTrayDisplay() {
   // A renderer-generated icon is cached in the main process. Only reuse it
   // while the current stats still have quota text; otherwise it can outlive
   // the provider data that generated it.
-  const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
+  const trayImageMode = (mode === 'limitsAllSessions' && Boolean(limitText) || mode === 'liveTokenRate')
+    && providerTrayIcons[mode];
   const customImageMode = mode === 'custom' && providerTrayIcons.custom;
   const text = trayImageMode || customImageMode ? '' : limitText;
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
@@ -3911,6 +4420,8 @@ function sendStatus(connected, extra) {
 // `options` is forwarded verbatim to the runtime; the quit path passes
 // `skipCloseWatchers` (see stopAll).
 function stopLocalCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
@@ -3981,6 +4492,7 @@ function startLocalCollector() {
     usageOptions,
     progressive: true,
     onRecord: (summary, meta) => {
+      seedInitialLimitProviders(summary);
       const reason = meta.reason;
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -3996,6 +4508,7 @@ function startLocalCollector() {
   }, {
     limitsDeps: electronLimitsDeps()
   });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
   drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
@@ -4039,7 +4552,11 @@ async function startStatsStream(options = {}) {
   sseAbortController = controller;
   try {
     const response = await fetch(url, {
-      headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      headers: {
+        accept: 'text/event-stream',
+        [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
+        ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      },
       signal: controller.signal
     });
     if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
@@ -4064,10 +4581,20 @@ async function startStatsStream(options = {}) {
         buffer = buffer.slice(idx + 2);
         let parsed = parseSseChunk(chunk);
         if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) {
+          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
             const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
             parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+            updateDiscordRpcDisplay(displayStats);
+          } else if (parsed.event === 'freshness') {
+            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+            if (!refreshed) continue;
+            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+            parsed = {
+              event: 'stats',
+              data: { type: 'stats', reason: parsed.data?.reason || 'ingest', stats: displayStats, at: parsed.data?.at }
+            };
             updateDiscordRpcDisplay(displayStats);
           }
           sendPush(parsed, { widgetProducerOwner });
@@ -4098,37 +4625,6 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
-}
-
-function openMainWindowFromWidget() {
-  if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
-  pendingMacWidgetOpen = null;
-  updateRendererViewState({ breakdown: destination.view });
-  applyMacActivationPolicy({ mainWindowVisible: true });
-  // Closing the window with the tray icon off destroys it while macOS keeps the
-  // app alive, so a widget click has to be able to build one again — the same
-  // recovery focusExistingWindow() performs for the dock and the shortcut.
-  // Bailing out instead consumed the open-url event and left the widget dead
-  // for the rest of the session, since nothing else reads pendingMacWidgetOpen.
-  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const sendDestination = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (destination.settings) mainWindow.webContents.send('settings:open');
-    else mainWindow.webContents.send('view:open', destination.view);
-  };
-  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendDestination);
-  else sendDestination();
-  if (settings?.trayMode && tray) {
-    showPopover();
-    return;
-  }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  applyMacSpaceBehavior(false);
-  // A collapsed bubble would otherwise swallow the navigation we just sent.
-  if (floatingBubbleState.collapsed) expandFloatingBubble();
-  else mainWindow.show();
 }
 
 function hidePopover() {
@@ -4217,10 +4713,95 @@ function redactThirdPartyProfilesForRenderer(profiles) {
           }
         : {}),
       accessToken: profile?.accessToken ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : ''
+      apiKey: profile?.apiKey ? 'set' : '',
+      refreshToken: profile?.refreshToken ? 'set' : ''
     };
   }
   return out;
+}
+
+// Sub2API rotates its single-use refresh token on every renewal. Persist the
+// new pair with a compare-and-swap before the collector retries with it.
+// New profiles require a current access token and are never persisted from a
+// renewal callback while their save probe is still in flight.
+function persistThirdPartyCredentialsRenewal(renewal = {}) {
+  const accountName = String(renewal.accountName || '').trim();
+  const adapter = thirdPartyLimits.normalizeAdapterId(renewal.adapter);
+  const profiles = settings?.thirdPartyProfiles || {};
+  const profile = profiles[accountName];
+  if (!accountName || !profile || profile.adapter !== adapter) return false;
+  const previousAccessToken = String(renewal.previous?.accessToken || '');
+  const previousRefreshToken = String(renewal.previous?.refreshToken || '');
+  if (
+    String(profile.accessToken || '') !== previousAccessToken
+    || String(profile.refreshToken || '') !== previousRefreshToken
+  ) return false;
+  const normalized = thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    accessToken: renewal.next?.accessToken,
+    refreshToken: renewal.next?.refreshToken
+  });
+  if (!normalized) return false;
+  settings.thirdPartyProfiles = {
+    ...profiles,
+    [accountName]: { ...normalized, enabled: profile.enabled !== false }
+  };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    // Keep the rotated pair in memory so this process can recover on a later
+    // settings write, but tell the caller not to present this renewal as durable.
+    console.log(`[thirdparty] credential renewal persist failed: ${error?.message || error}`);
+    return false;
+  }
+  return true;
+}
+
+function persistThirdPartyAccountKey(update = {}) {
+  const accountName = String(update.accountName || '').trim();
+  const adapter = thirdPartyLimits.normalizeAdapterId(update.adapter);
+  const accountKey = thirdPartyLimits.normalizeCanonicalAccountKey(update.accountKey);
+  const profiles = settings?.thirdPartyProfiles || {};
+  const profile = profiles[accountName];
+  if (
+    !accountName
+    || adapter !== thirdPartyLimits.SUB2API_ADAPTER
+    || !accountKey
+    || !profile
+    || profile.adapter !== adapter
+  ) return false;
+  const baseUrl = thirdPartyLimits.normalizeThirdPartyBaseUrl(update.baseUrl);
+  if (thirdPartyLimits.normalizeThirdPartyBaseUrl(profile.baseUrl) !== baseUrl) return false;
+  if (
+    String(profile.accessToken || '') !== String(update.previous?.accessToken || '')
+    || String(profile.refreshToken || '') !== String(update.previous?.refreshToken || '')
+  ) return false;
+  if (thirdPartyLimits.normalizeCanonicalAccountKey(profile.canonicalAccountKey) === accountKey) {
+    return true;
+  }
+  const normalized = thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    canonicalAccountKey: accountKey
+  });
+  if (!normalized) return false;
+  settings.thirdPartyProfiles = {
+    ...profiles,
+    [accountName]: { ...normalized, enabled: profile.enabled !== false }
+  };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    console.log(`[thirdparty] account identity persist failed: ${error?.message || error}`);
+    return false;
+  }
+  return true;
+}
+
+function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
+  return thirdPartyLimits.normalizeThirdPartyProfile({
+    ...profile,
+    canonicalAccountKey: provider?.accountKey
+  });
 }
 
 function settingsForRenderer() {
@@ -4244,11 +4825,21 @@ function settingsForRenderer() {
     : copilotToken(process.env)
       ? 'env'
       : '';
+  const factoryAutomaticCredential = resolveFactoryAutomaticApiKey({}, { env: process.env });
+  const factoryCredentialSource = settings?.factoryApiKey ? 'settings' : factoryAutomaticCredential.source;
+  const zcodeAutoCredential = currentZcodeAutoCredential();
+  // "A usable local ZCode login exists" — advertised so the renderer shows
+  // the auto-detect state instead of "disabled" when the provider is
+  // unchecked. Anything else (API-only, unentitled plan) is not an auto
+  // quota source.
+  const zcodeLoginDetected = Boolean(zcodeAutoCredential);
   const zaiApiKeySource = settings?.zaiApiKey
     ? 'settings'
     : zaiToken(process.env)
       ? 'env'
-      : '';
+      : zcodeAutoCredential
+        ? 'zcode-auto'
+        : '';
   const zaiTeamApiKeySource = settings?.zaiTeamApiKey
     ? 'settings'
     : zaiTeamToken(process.env)
@@ -4264,6 +4855,16 @@ function settingsForRenderer() {
     : qoderCookie(process.env)
       ? 'env'
       : '';
+  const traeAccessTokenSource = settings?.traeAccessToken
+    ? 'settings'
+    : traeAccessToken(process.env)
+      ? 'env'
+      : '';
+  const zedCookieSource = settings?.zedCookie
+    ? 'settings'
+    : zedCookie(process.env)
+      ? 'env'
+      : '';
   const commandcodeCookieSource = settings?.commandcodeCookie
     ? 'settings'
     : commandcodeCookie(process.env)
@@ -4272,6 +4873,11 @@ function settingsForRenderer() {
   const ollamaCookieSource = settings?.ollamaCookie
     ? 'settings'
     : ollamaSessionCookie(process.env)
+      ? 'env'
+      : '';
+  const alibabaCookieSource = settings?.alibabaCookie
+    ? 'settings'
+    : alibabaCookie(process.env)
       ? 'env'
       : '';
   const kimiApiKeySource = settings?.kimiApiKey
@@ -4290,8 +4896,17 @@ function settingsForRenderer() {
   const redactedCredentials = credentialSettingsForRenderer(settings, {
     expose: ['hubHostSecret', 'secret']
   });
+  const rendererSettings = { ...settings };
+  for (const key of [
+    'workbuddyAccessToken',
+    'workbuddyUserId',
+    'workbuddyEnterpriseId',
+    'workbuddyLocale',
+    'workbuddyDomain',
+    'workbuddyDepartmentInfo'
+  ]) delete rendererSettings[key];
   return {
-    ...settings,
+    ...rendererSettings,
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -4309,8 +4924,14 @@ function settingsForRenderer() {
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
     zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
     volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
+    volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
     claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
+    alibabaCookie: settings?.alibabaCookie ? 'set' : '',
+    alibabaVariant: normalizeAlibabaVariant(settings?.alibabaVariant),
     qoderCookie: settings?.qoderCookie ? 'set' : '',
+    traeAccessToken: settings?.traeAccessToken ? 'set' : '',
+    traeDeviceId: settings?.traeDeviceId ? 'set' : '',
+    zedCookie: settings?.zedCookie ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -4328,6 +4949,7 @@ function settingsForRenderer() {
     openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
     thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
     codexManagedAccounts: codexAccountsForRenderer(),
+    antigravityManagedAccounts: antigravityAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
     claudeWebCookieSource,
@@ -4337,18 +4959,27 @@ function settingsForRenderer() {
     minimaxApiKeySource,
     copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
     copilotApiTokenSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
+    factoryCredentialConfigured: Boolean(currentFactoryApiKey()),
+    factoryCredentialSource,
+    zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
     zaiApiKeySource,
+    zcodeLoginDetected,
     zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
     zaiTeamApiKeySource,
     volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
     volcengineCredentialsSource,
     qoderCookieConfigured: Boolean(currentQoderCookie()),
     qoderCookieSource,
+    traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
+    traeAccessTokenSource,
+    zedCookieConfigured: Boolean(currentZedCookie()),
+    zedCookieSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
     ollamaCookieSource,
+    alibabaCookieConfigured: Boolean(currentAlibabaCookie()),
+    alibabaCookieSource,
     kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
     kimiApiKeySource,
     kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
@@ -4462,6 +5093,11 @@ function refreshLimitStatsPresentation() {
 function sendMimoAccountsPush() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendAntigravityAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('antigravity:accounts', antigravityAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -4739,7 +5375,10 @@ function enterTrayMode() {
 function exitTrayMode() {
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(false);
+    // Not an unconditional false: leaving tray-only mode with hideAppIcon still
+    // on keeps the widget off the taskbar. applyWindowSettings() below would
+    // correct it either way, but only after a visible flash of the entry.
+    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
     setWindowMaximizable(mainWindow, true);
     applyMacSpaceBehavior(false);
     const restore = restoredBounds() || DEFAULT_WINDOW;
@@ -4838,6 +5477,28 @@ function restartDeviceRuntimeForMode() {
   else startLocalCollector();
 }
 
+function usageCollectorNameForMode() {
+  return mode === 'local'
+    ? 'collector'
+    : (settings.hubMode === 'host' && embeddedHub ? 'host-collector' : 'sync-collector');
+}
+
+function usageConfigForMode() {
+  return electronUsageConfig(usageCollectorNameForMode());
+}
+
+function applyUsageRuntimeForMode() {
+  if (!deviceRuntimeHandle?.reconfigureUsage) {
+    restartDeviceRuntimeForMode();
+    return Boolean(deviceRuntimeHandle);
+  }
+  return deviceRuntimeHandle.reconfigureUsage(usageConfigForMode()) === true;
+}
+
+function reconfigureUsageRuntimeForMode() {
+  return usageRuntimeReconciler.schedule(usageConfigFingerprint(usageConfigForMode()));
+}
+
 // Quit-path teardown. Every step here must be synchronous, because performQuit
 // exits on the next line and anything awaited in between is a chance to never
 // get there. `skipCloseWatchers` is what buys that: chokidar's close() returns a
@@ -4865,6 +5526,9 @@ function stopAll() {
   // the process, and a graceful hub close buys nothing on the way out.
   void stopEmbeddedHub();
   stopDiscordRpc();
+  try { sessionUsageArchiveStore.close(); } catch (error) {
+    console.log(`[session-archive] close failed: ${error?.message || error}`);
+  }
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -4935,7 +5599,8 @@ function requestAppQuit() {
 // itself; callers pass only `periods` (privacy: devices/limits never enter).
 async function writeExportTo(dir, periods, options = {}) {
   if (!dir) return { ok: false, reason: 'no-dir' };
-  const history = await getDashboardHistory().catch(() => null);
+  // Export remains lossless: local display aliases never rewrite exported IDs.
+  const history = await getCompleteHistory().catch(() => null);
   // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
   // "no history": writing a snapshot-only set would emit empty time-series JSON
   // AND the orphan cleanup below would delete an existing daily.csv. Never write a
@@ -4954,7 +5619,7 @@ async function writeExportTo(dir, periods, options = {}) {
   const files = exportFileSet({
     periods: periods || {},
     history,
-    meta: { generatedAt: new Date().toISOString(), app: { name: 'token-monitor', version: appVersion() } }
+    meta: { generatedAt: new Date().toISOString(), app: { name: 'token-m', version: appVersion() } }
   });
   await fs.promises.mkdir(dir, { recursive: true });
   // Per-call token so a concurrent auto + manual export to the same folder never
@@ -5521,6 +6186,8 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
   if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
   if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Gary06910/TokenM')) return true;
+  if (parsed.hostname === 'codex-resets.com' && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   if (
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
     && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
@@ -5532,13 +6199,21 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
   if (parsed.hostname === 'platform.minimaxi.com') return true;
   if (parsed.hostname === 'platform.minimax.io') return true;
+  if (parsed.hostname === 'app.factory.ai' && parsed.pathname.startsWith('/settings/api-keys')) return true;
   if (parsed.hostname === 'z.ai' || parsed.hostname === 'www.z.ai') return true;
   if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
   if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
+  if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
   if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
+  if (parsed.hostname === 'dashboard.zed.dev') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
+  // Token Plan lives behind a hash route, so the console's region path is all
+  // there is to match on. Kept host-scoped rather than opening the whole
+  // console, in line with every other entry here.
+  if (parsed.hostname === 'bailian.console.aliyun.com' && parsed.pathname.startsWith('/cn-beijing')) return true;
+  if (parsed.hostname === 'modelstudio.console.alibabacloud.com' && parsed.pathname.startsWith('/ap-southeast-1')) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -5625,13 +6300,19 @@ function createWindow(boundsOverride, options = {}) {
     resizable: !collapsedFloatingBubble,
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
-    skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
+    ...appWindowIcon(),
+    skipTaskbar: collapsedFloatingBubble || skipTaskbarForSettings(settings),
     ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
     ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    // visualEffectState is construction-time only — Electron exposes no setter for
+    // it (verified: BrowserWindow has setVibrancy but no setVisualEffectState), and
+    // it is what keeps the material vibrant while the window is not key. Without
+    // it macOS falls back to followWindow and the glass greys out on blur. The
+    // vibrancy here is immediately re-evaluated by applyNativeMaterial() below, so
+    // a window that is not on screen still ends up with no material attached.
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5640,6 +6321,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
+  mainWindowNativeBlurEnabled = null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -5677,19 +6359,22 @@ function createWindow(boundsOverride, options = {}) {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   applyWindowSettings();
+  attachNativeMaterialVisibility(win, () => mainWindowNativeBlurEnabled);
   applyNativeMaterial();
-  keepNativeBlurActive();
   win.on('focus', () => {
     stopFloatingBubbleAutoCollapseTimer();
-    keepNativeBlurActive();
   });
   win.on('blur', () => {
-    keepNativeBlurActive();
+    nudgeTaskbarZOrder();
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
-  win.on('resized', persistBoundsSoon);
-  win.on('moved', persistBoundsSoon);
+  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  win.on('show', syncTaskbarZOrder);
+  win.on('restore', syncTaskbarZOrder);
+  win.on('hide', stopTaskbarZOrderKeeper);
+  win.on('minimize', stopTaskbarZOrderKeeper);
   win.on('close', (event) => {
     if (quitRequested) return;
     const action = mainWindowCloseAction(settings, { platform: process.platform });
@@ -5703,7 +6388,23 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
-  win.webContents.once('did-finish-load', sendFloatingBubbleState);
+  win.on('show', () => sendMainWindowVisibility(win));
+  win.on('hide', () => sendMainWindowVisibility(win));
+  win.on('minimize', () => sendMainWindowVisibility(win));
+  win.on('restore', () => sendMainWindowVisibility(win));
+  win.webContents.on('did-finish-load', () => {
+    sendFloatingBubbleState();
+    // Only report a window that is already on screen. A window still awaiting its
+    // reveal reports isVisible() === false, and loadWindowFile({ waitForContent })
+    // reveals it *because* the renderer painted real content — pushing "hidden"
+    // here stops that render, so the reveal could only come from the 2.5s
+    // fallback. Electron reports visibilityState 'visible' for a show:false
+    // window, which is the default the renderer keeps; trayMode instead seeds the
+    // hidden state through the windowHidden query flag. Keep this listener for
+    // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
+    // window needs its native visibility resynced after every renderer reload.
+    if (win.isVisible()) sendMainWindowVisibility(win);
+  });
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
@@ -5715,6 +6416,7 @@ function createWindow(boundsOverride, options = {}) {
         suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
         viewState: rendererViewState
       }),
+      ...(settings?.trayMode ? { windowHidden: '1' } : {}),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
       ...(windowsAccentFallback ? { windowsBackdropFallback: '1' } : {})
     }
@@ -5780,9 +6482,9 @@ function createDashboardWindow() {
     transparent: !(process.platform === 'win32' && glass),
     show: false,
     backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
+    ...appWindowIcon(),
     skipTaskbar: false,
-    ...(process.platform === 'darwin' && glass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -5791,7 +6493,10 @@ function createDashboardWindow() {
     }
   });
   dashboardWindow = win;
+  dashboardWindowNativeBlurEnabled = glass;
   applyWindowsChrome(win, { round: true });
+  attachNativeMaterialVisibility(win, () => dashboardWindowNativeBlurEnabled);
+  syncNativeMaterialVisibility(win, dashboardWindowNativeBlurEnabled);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -5813,7 +6518,10 @@ function createDashboardWindow() {
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
-  win.on('closed', () => { dashboardWindow = null; });
+  win.on('closed', () => {
+    dashboardWindow = null;
+    dashboardWindowNativeBlurEnabled = false;
+  });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
@@ -5826,29 +6534,52 @@ async function getDashboardHistory(options = {}) {
     : { history: await getCompleteHistory(), deviceHistories: undefined };
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
-  return {
+  return projectModelAliasHistory({
     ...history,
     ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
-  };
+  }, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
 
 let cursorStatusCache = { value: null, at: 0 };
 let opencodeStatusCache = { value: null, at: 0 };
 const CURSOR_STATUS_TTL_MS = 30 * 1000;
+const CURSOR_EXTERNAL_AGENT_ERROR = 'Stop the headless agent before managing Cursor accounts.';
 
 function normalizeManualCookie(input) {
-  let s = String(input || '').trim();
-  if (!s) return '';
-  if (s.toLowerCase().startsWith('cookie:')) s = s.slice(7).trim();
-  // If they pasted the full cookie header, extract the WorkosCursorSessionToken= value.
-  const match = s.match(/WorkosCursorSessionToken=([^;\s]+)/);
-  if (match) return match[1];
-  // Otherwise assume the whole string is the raw token value.
-  if (/\s/.test(s)) return '';
-  return s;
+  return cursorAuth.normalizeCursorSessionToken(input);
+}
+
+async function cursorStatusValue({ discover = false } = {}) {
+  const managementBlocked = isExternalAgentActive();
+  let accounts = cursorAuth.listAccounts();
+  if (discover && !managementBlocked) {
+    try { await cursorAuth.runCursorDiscover(); } catch (_) { /* signed-out or unavailable Cursor app */ }
+    accounts = cursorAuth.listAccounts();
+  }
+  const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
+  const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
+  const safeAccounts = await Promise.all(accounts.map(async (account) => {
+    const probeResult = await cursorProbe.probe(account.sessionToken);
+    return {
+      id: account.id,
+      enabled: !disabled.has(account.id),
+      removable: manual.has(account.id),
+      email: probeResult.ok ? probeResult.user?.email || '' : '',
+      label: account.label || '',
+      membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
+      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      error: probeResult.ok ? '' : probeResult.error?.message || ''
+    };
+  }));
+  return {
+    loggedIn: safeAccounts.length > 0,
+    accounts: safeAccounts,
+    linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length,
+    managementBlocked
+  };
 }
 
 function rebuildWindow() {
@@ -5912,7 +6643,6 @@ app.whenReady().then(() => {
   configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
-  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
@@ -5939,10 +6669,10 @@ app.whenReady().then(() => {
   ipcMain.handle('notifications:getStatus', () => notifications.getStatus());
   ipcMain.handle('notifications:enableCodexHook', () => notifications.enableCodexHook());
   ipcMain.handle('notifications:disableCodexHook', () => notifications.disableCodexHook());
-  ipcMain.handle('notifications:pairWeChat', (_event, request) => notifications.pairWeChat(request || {}));
-  ipcMain.handle('notifications:setWeChatEnabled', (_event, enabled) => notifications.setWeChatEnabled(enabled));
-  ipcMain.handle('notifications:setWeChatPrivacyMode', (_event, privacyMode) => notifications.setWeChatPrivacyMode(privacyMode));
-  ipcMain.handle('notifications:unpairWeChat', () => notifications.unpairWeChat());
+  ipcMain.handle('notifications:pairAndroid', (_event, request) => notifications.pairAndroid(request || {}));
+  ipcMain.handle('notifications:setAndroidEnabled', (_event, enabled) => notifications.setAndroidEnabled(enabled));
+  ipcMain.handle('notifications:setAndroidPrivacyMode', (_event, privacyMode) => notifications.setAndroidPrivacyMode(privacyMode));
+  ipcMain.handle('notifications:unpairAndroid', () => notifications.unpairAndroid());
 
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {
@@ -5967,7 +6697,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sessionUsageArchive:clear', () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
-      clearSessionUsageArchive();
+      sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };
@@ -5995,6 +6725,7 @@ app.whenReady().then(() => {
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
     const previousTrayMode = settings.trayMode;
+    const previousHideAppIcon = settings.hideAppIcon;
     const previousTrayContent = settings.trayContent;
     const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
     const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
@@ -6010,7 +6741,21 @@ app.whenReady().then(() => {
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.codexManagedAccounts;
+    delete normalizedPatch.antigravityManagedAccounts;
     delete normalizedPatch.mimoManagedAccounts;
+    delete normalizedPatch.workbuddyAccessToken;
+    delete normalizedPatch.workbuddyUserId;
+    delete normalizedPatch.workbuddyEnterpriseId;
+    delete normalizedPatch.workbuddyEndpoint;
+    delete normalizedPatch.workbuddyLocale;
+    delete normalizedPatch.workbuddyDomain;
+    delete normalizedPatch.workbuddyDepartmentInfo;
+    delete normalizedPatch.workbuddyLocalAppEnabled;
+    // Notification credentials and lifecycle state have dedicated IPC methods;
+    // the generic upstream settings channel must not become a second write path.
+    for (const key of Object.keys(normalizedPatch)) {
+      if (key.startsWith('tokenM')) delete normalizedPatch[key];
+    }
     delete normalizedPatch.openrouterProfiles;
     delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
@@ -6029,11 +6774,18 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    if (patch.customScanPaths !== undefined) {
+      const limitError = customScanPathLimitError(patch.customScanPaths);
+      if (limitError) throw new Error(limitError);
+      normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
+    if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
     if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
     if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
     if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
+    if (patch.factoryApiKey !== undefined) normalizedPatch.factoryApiKey = normalizeFactoryApiKey(patch.factoryApiKey);
     if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
     if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
     if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
@@ -6042,8 +6794,16 @@ app.whenReady().then(() => {
     if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
     if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
     if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
+    if (patch.volcengineAgentAccessKeyId !== undefined) normalizedPatch.volcengineAgentAccessKeyId = normalizeSecretSetting(patch.volcengineAgentAccessKeyId);
+    if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
+    if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
     if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
+    if (patch.alibabaCookie !== undefined) normalizedPatch.alibabaCookie = normalizeAlibabaCookie(patch.alibabaCookie);
+    if (patch.alibabaVariant !== undefined) normalizedPatch.alibabaVariant = normalizeAlibabaVariant(patch.alibabaVariant);
     if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
+    if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
+    if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
+    if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -6061,6 +6821,7 @@ app.whenReady().then(() => {
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
+      customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
@@ -6071,7 +6832,11 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
+      liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
+      modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),
@@ -6101,8 +6866,8 @@ app.whenReady().then(() => {
       limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
-      hiddenClients: patch.hiddenClients !== undefined ? normalizeHiddenClients(patch.hiddenClients, KNOWN_CLIENT_LIST) : normalizeHiddenClients(settings.hiddenClients, KNOWN_CLIENT_LIST),
-      pinnedClients: patch.pinnedClients !== undefined ? normalizePinnedClients(patch.pinnedClients, KNOWN_CLIENT_LIST) : normalizePinnedClients(settings.pinnedClients, KNOWN_CLIENT_LIST),
+      hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
+      pinnedClients: patch.pinnedClients !== undefined ? migrateClientSelection(patch.pinnedClients, normalizePinnedClients) : migrateClientSelection(settings.pinnedClients, normalizePinnedClients),
       viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewDisplayOrder(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
@@ -6113,6 +6878,7 @@ app.whenReady().then(() => {
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
@@ -6129,14 +6895,18 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
+      showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
       opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
       opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
+      keepAboveTaskbar: parseBoolean(patch.keepAboveTaskbar ?? settings.keepAboveTaskbar, false),
       windowMaximized: parseBoolean(settings.windowMaximized, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
       ...normalizeTrayModeSettings({
         showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
-        trayMode: patch.trayMode ?? settings.trayMode
+        trayMode: patch.trayMode ?? settings.trayMode,
+        hideAppIcon: patch.hideAppIcon ?? settings.hideAppIcon
       }),
       trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
       trayCustomLayout: normalizeTrayLayout(patch.trayCustomLayout ?? settings.trayCustomLayout),
@@ -6156,6 +6926,7 @@ app.whenReady().then(() => {
       minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
       copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
       copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
+      factoryApiKey: patch.factoryApiKey !== undefined ? normalizeFactoryApiKey(patch.factoryApiKey) : (settings.factoryApiKey || ''),
       zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
       zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
       zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
@@ -6164,14 +6935,22 @@ app.whenReady().then(() => {
       volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
       volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
       volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
+      volcengineAgentAccessKeyId: patch.volcengineAgentAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAgentAccessKeyId) : (settings.volcengineAgentAccessKeyId || ''),
+      volcengineAgentSecretAccessKey: patch.volcengineAgentSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineAgentSecretAccessKey) : (settings.volcengineAgentSecretAccessKey || ''),
+      volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
       qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
       qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
+      alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
+      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : (settings.alibabaVariant || ''),
+      traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
+      traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
+      zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
-    }, normalizedPatch);
+    }, windowBehaviorSelection(normalizedPatch));
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
@@ -6181,6 +6960,7 @@ app.whenReady().then(() => {
       settings = previousSettingsState;
       throw error;
     }
+    if (patch?.limitProviders !== undefined) initialLimitProvidersPending = false;
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
@@ -6226,12 +7006,15 @@ app.whenReady().then(() => {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       startMode();
-    } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
+    } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
       restartDeviceRuntimeForMode();
     } else {
+      if (runtimeChange.usageStructural) {
+        reconfigureUsageRuntimeForMode();
+      }
       if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
@@ -6259,6 +7042,11 @@ app.whenReady().then(() => {
     ) {
       updateTrayDisplay();
     }
+    // enterTrayMode()/exitTrayMode() already re-apply the policy; this covers a
+    // hideAppIcon flip on its own, which is the only other input to it.
+    if (settings.hideAppIcon !== previousHideAppIcon && settings.trayMode === previousTrayMode) {
+      applyMacActivationPolicy();
+    }
     if (patch.currency !== undefined || patch.currencyRates !== undefined) {
       applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
       updateTrayDisplay();
@@ -6269,6 +7057,16 @@ app.whenReady().then(() => {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
+    }
+    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
+      || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping) {
+      // No collection/pricing refresh: regroup the cached source immediately,
+      // including when the hub is offline. Revision decoration invalidates the
+      // main renderer's full-history caches; the dashboard has its own event.
+      refreshLimitStatsPresentation();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+      }
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
@@ -6371,8 +7169,16 @@ app.whenReady().then(() => {
       const img = nativeImage.createFromDataURL(dataUrl);
       if (img.isEmpty()) continue;
       // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay 20x20.
-      const sized = img.resize({ height: 20, quality: 'best' });
+      // icons keep their width while square provider icons stay square.
+      // Windows targets its own small-icon metric (16px x the display scale
+      // factor) rather than the macOS menubar height, so a single high-quality
+      // downscale of the 44px-tall renderer source stays crisp in the
+      // notification area instead of the old fixed 20px-for-all blur, and its
+      // square cell gets the bitmap trimmed to the pixels the renderer drew.
+      const sized = prepareTrayIconForPlatform(img, {
+        platform: process.platform,
+        scaleFactor: screen.getPrimaryDisplay().scaleFactor
+      });
       if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
       providerTrayIcons[id] = sized;
     }
@@ -6414,6 +7220,12 @@ app.whenReady().then(() => {
     force: Boolean(options?.force),
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
   }));
+  ipcMain.handle('codexResetForecast:get', (_event, options) => {
+    if (settings?.codexResetForecastEnabled !== true) {
+      return { status: 'disabled', checkedAt: new Date().toISOString() };
+    }
+    return codexResetForecastClient.getForecast({ force: Boolean(options?.force) });
+  });
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
@@ -6432,6 +7244,7 @@ app.whenReady().then(() => {
     // So the diagnostics panel can print ~/… instead of the user's account name.
     homeDir: require('os').homedir(),
     sharedDataDir: sharedDataDir(),
+    customScanClientIds: CUSTOM_SCAN_CLIENT_IDS,
     loginItemSupported: loginItemEnabledHere(),
     loginItemOpenAtLogin: currentLoginItemState(),
     systemDarkUi: currentSystemDarkTrayUi()
@@ -6464,19 +7277,43 @@ app.whenReady().then(() => {
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
     trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
-    visibleDiagnosticRoots,
-    clientDiagnosticRoots,
+    visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
+    revealClientSyncLock: () => {
+      const lockPath = antigravitySyncLockPath(os.homedir());
+      if (!fs.existsSync(lockPath)) return false;
+      shell.showItemInFolder(lockPath);
+      return true;
+    },
     canRunRescan: () => ownsUsageRuntime(),
     rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    repairClientSyncLock: () => repairAntigravitySyncLock({
+      lockPath: antigravitySyncLockPath(os.homedir())
+    }),
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      defaultPath: app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const dir = result.filePaths[0];
+    const normalized = normalizeCustomScanPaths({ [client]: [dir] });
+    if (!normalized[client]?.[0]) return { ok: false, error: 'unsupported-path' };
+    return { ok: true, dir: normalized[client][0] };
+  });
   // The renderer sends a client id, never a path: anything it could send would
   // otherwise become an arbitrary filesystem open.
   ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
+  ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -6488,6 +7325,11 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
+  ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
+  ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
+  ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
@@ -6510,16 +7352,31 @@ app.whenReady().then(() => {
   ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.handle('cursor:loginManual', async (_event, raw) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
     const token = normalizeManualCookie(raw);
     if (!token) return { ok: false, error: 'Empty or malformed token' };
     try {
       const probeResult = await cursorProbe.probe(token);
       if (!probeResult.ok) return { ok: false, error: probeResult.error?.message || 'Cursor rejected the token' };
-      await cursorAuth.runCursorLogin(token);
+      const accountId = await cursorAuth.runCursorLogin(token);
+      const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
+        .filter((id) => id !== accountId);
+      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
+      settings.cursorDisabledAccountIds = disabled;
+      settings.cursorManualAccountIds = normalizeCursorAccountIds([
+        ...settings.cursorManualAccountIds,
+        accountId
+      ]);
+      saveSettings({ throwOnError: true });
+      if (limitsChanged) {
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      }
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
-      return { ok: true, email: probeResult.user.email };
+      return { ok: true, email: probeResult.user.email, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -6590,6 +7447,7 @@ app.whenReady().then(() => {
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
+  ipcMain.handle('factory:validateApiKey', (_event, raw) => validateFactoryApiKey(raw));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {
@@ -6624,13 +7482,49 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('cursor:logout', async () => {
+  ipcMain.handle('cursor:setAccountEnabled', async (_event, accountId, enabled) => {
     try {
-      await cursorAuth.runCursorLogout();
+      const id = String(accountId || '').trim();
+      if (!id || !cursorAuth.listAccounts().some((account) => account.id === id)) {
+        return { ok: false, error: 'Cursor account not found' };
+      }
+      const disabled = new Set(normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds));
+      if (enabled) disabled.delete(id);
+      else disabled.add(id);
+      settings.cursorDisabledAccountIds = [...disabled];
+      saveSettings({ throwOnError: true });
+      cursorStatusCache = { value: null, at: 0 };
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'cursor' }, 'account-toggle', { clear: true });
+      return { ok: true, status: await cursorStatusValue() };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+  ipcMain.handle('cursor:logout', async (_event, accountId) => {
+    if (isExternalAgentActive()) {
+      return { ok: false, code: 'EXTERNAL_AGENT_ACTIVE', error: CURSOR_EXTERNAL_AGENT_ERROR };
+    }
+    try {
+      const removeId = String(accountId || '').trim();
+      const manual = new Set(normalizeCursorAccountIds(settings.cursorManualAccountIds));
+      if (!removeId || !manual.has(removeId)) {
+        return { ok: false, error: 'Only manually added Cursor accounts can be removed' };
+      }
+      await cursorAuth.runCursorLogout({ accountId: removeId });
+      const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
+        .filter((id) => id !== removeId);
+      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
+      settings.cursorDisabledAccountIds = disabled;
+      settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
+      saveSettings({ throwOnError: true });
+      if (limitsChanged) {
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      }
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
-      return { ok: true };
+      return { ok: true, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -6647,27 +7541,12 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('cursor:status', async () => {
+  ipcMain.handle('cursor:status', async (_event, options = {}) => {
     const now = Date.now();
-    if (cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
+    if (options?.force !== true && options?.discover !== true && cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
       return cursorStatusCache.value;
     }
-    const account = cursorAuth.readActiveAccount();
-    if (!account) {
-      const value = { loggedIn: false };
-      cursorStatusCache = { value, at: now };
-      return value;
-    }
-    const probeResult = await cursorProbe.probe(account.sessionToken);
-    const value = probeResult.ok
-      ? {
-          loggedIn: true,
-          email: probeResult.user.email,
-          membershipType: probeResult.usage.membershipType,
-          billingCycleEnd: probeResult.usage.billingCycleEnd,
-          expired: false
-        }
-      : { loggedIn: true, expired: probeResult.error?.kind === 'unauthorized', error: probeResult.error?.message };
+    const value = await cursorStatusValue({ discover: options?.discover === true });
     cursorStatusCache = { value, at: now };
     return value;
   });
@@ -7178,6 +8057,10 @@ app.whenReady().then(() => {
       && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
     ) return { ok: false, errorCode: 'missingAccessToken' };
     if (
+      adapter === thirdPartyLimits.SUB2API_ADAPTER
+      && !thirdPartyLimits.newapiAccessToken({}, rawProfile.accessToken)
+    ) return { ok: false, errorCode: 'missingAccessToken' };
+    if (
       [thirdPartyLimits.NEWAPI_TOKEN_ADAPTER, thirdPartyLimits.CUSTOM_BALANCE_ADAPTER].includes(adapter)
       && !thirdPartyLimits.newapiApiKey({}, rawProfile.apiKey)
     ) return { ok: false, errorCode: 'missingApiKey' };
@@ -7229,9 +8112,10 @@ app.whenReady().then(() => {
           errorCode: provider?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable'
         };
       }
+      const storedProfile = thirdPartyProfileWithCanonicalIdentity(profile, provider) || profile;
       settings.thirdPartyProfiles = {
         ...(settings.thirdPartyProfiles || {}),
-        [name]: profile
+        [name]: storedProfile
       };
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
@@ -7457,7 +8341,15 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  // The window this builds is about to be on screen, so the policy is resolved
+  // for a visible window exactly as focusExistingWindow() does. Without it this
+  // was the one path reaching applyMacSpaceBehavior() with a process type
+  // nothing had decided, which skipTransformProcessType now preserves.
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    applyMacActivationPolicy({ mainWindowVisible: true });
+    createWindow();
+  });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
@@ -7470,10 +8362,13 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  antigravityOAuthLoginController?.abort();
   resetMacWidgetReloadThrottle();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  stopTaskbarZOrderKeeper();
   unregisterWindowToggleShortcut();
+  electronWorkbuddyLocalAuth.dispose();
   if (skipForcedQuit) return;
   performQuit();
 });

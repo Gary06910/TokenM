@@ -2,9 +2,10 @@
 
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
+const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -12,7 +13,7 @@ const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 // stores data there and the home is worth a tokscale scan. These mirror the roots
 // tokscale actually reads (incl. alternate roots: Claude transcripts, Kimi
 // Code, legacy OpenClaw bot dirs) so a home holding only an alternate-root client
-// is still discovered. The `.vscode-server` entries cover Cline / Kilo Code
+// is still discovered. The `.vscode-server` entries cover Cline / Kilo
 // running through the VS Code WSL remote.
 const WSL_DATA_MARKERS = [
   '.claude/projects',
@@ -32,12 +33,16 @@ const WSL_DATA_MARKERS = [
   '.gemini/antigravity-cli/conversations',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
+  '.local/share/amp/threads',
   '.pi/agent/sessions',
   '.omp/agent/sessions',
   '.local/share/zed/threads/threads.db',
+  '.local/share/kilo/kilo.db',
   '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
   '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
   '.commandcode/projects',
+  '.dsh/sessions',
+  '.factory/sessions',
   '.local/share/mimocode/mimocode.db',
   '.zcode/projects',
   '.zcode/cli/db',
@@ -47,7 +52,10 @@ const WSL_DATA_MARKERS = [
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
   '.workbuddy',
-  '.proma/agent-sessions'
+  '.workbuddy-ai',
+  '.proma/agent-sessions',
+  '.lmstudio/server-logs',
+  '.unsloth/studio/studio.db'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -74,12 +82,16 @@ const MARKER_CLIENTS = {
   '.gemini/antigravity-cli/conversations': 'antigravity',
   '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
   '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
+  '.local/share/amp/threads': 'amp',
   '.pi/agent/sessions': 'pi',
   '.omp/agent/sessions': 'pi',
   '.local/share/zed/threads/threads.db': 'zed',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
+  '.local/share/kilo/kilo.db': 'kilo',
+  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
+  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilo',
   '.commandcode/projects': 'commandcode',
+  '.dsh/sessions': 'dsh',
+  '.factory/sessions': 'droid',
   '.local/share/mimocode/mimocode.db': 'micode',
   '.zcode/projects': 'zcode',
   '.zcode/cli/db': 'zcode',
@@ -89,7 +101,10 @@ const MARKER_CLIENTS = {
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
-  '.proma/agent-sessions': 'proma'
+  '.workbuddy-ai': 'workbuddy',
+  '.proma/agent-sessions': 'proma',
+  '.lmstudio/server-logs': 'lmstudio',
+  '.unsloth/studio/studio.db': 'unsloth'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
@@ -203,6 +218,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
+  throwIfAborted(options.signal, 'WSL usage scan aborted');
   if (!trackedClients) return { bundle, detected: [] };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
@@ -215,6 +231,7 @@ async function collectWslUsage(options = {}, deps = {}) {
     .filter((client) => client !== REASONIX_CLIENT)
     .join(',');
   for (const home of wslUsageHomes(deps)) {
+    throwIfAborted(options.signal, 'WSL usage scan aborted');
     // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
@@ -252,9 +269,12 @@ async function collectWslUsage(options = {}, deps = {}) {
     if (clientsCsv.length === 0 || typeof runTokscale !== 'function') continue;
     try {
       // Serial on purpose (issue #15): never run these concurrently.
-      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs });
-      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs });
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs });
+      const todayJson = await runTokscale({ clients: clientsCsv, flags: ['--today', '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
+      const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
+      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
         today: extractUsageFromTokscale(todayJson),
         month: extractUsageFromTokscale(monthJson),
@@ -265,6 +285,7 @@ async function collectWslUsage(options = {}, deps = {}) {
       bundle.month = mergePeriods(bundle.month, periods.month);
       bundle.allTime = mergePeriods(bundle.allTime, periods.allTime);
     } catch (error) {
+      throwIfAborted(options.signal, 'WSL usage scan aborted');
       if (typeof logger === 'function') logger(`wsl usage scan failed for ${home}: ${error.message}`);
     }
   }

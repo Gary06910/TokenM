@@ -1,0 +1,218 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="任务通知" :back="true" />
+        <notice-banner v-if="banner.length > 0" tone="warning" :text="banner" action-text="重试" @action="refresh" />
+        <ui-state v-if="state == 'loading'" mode="loading" variant="dashboard" />
+        <ui-state v-else-if="state == 'error'" mode="error" title="无法读取通知设置" :detail="errorMessage" action-text="重试" @action="refresh" />
+        <view v-else>
+          <view class="permission-focus surface">
+            <text class="focus-title">系统通知</text>
+            <status-marker :tone="permissionView(facts.notificationPermission).tone" :label="permissionView(facts.notificationPermission).label" />
+            <text class="focus-detail">{{ permissionView(facts.notificationPermission).detail }}</text>
+          </view>
+
+
+          <view class="setting-row section">
+            <view class="setting-copy">
+              <text class="setting-title">任务通知</text>
+              <text class="setting-detail">{{ settings.notificationsEnabled ? '已开启 · 任务完成时提醒你' : '已关闭 · 任务记录仍会保存' }}</text>
+            </view>
+            <switch :checked="settings.notificationsEnabled" :disabled="working || facts.login != 'signedIn' || facts.privacyConsent != 'current'" color="#2869c9" aria-label="任务通知开关" @change="toggleEnabled" />
+          </view>
+
+          <button
+            v-if="facts.login != 'signedIn'"
+            class="btn btn-primary section"
+            hover-class="btn-primary-active"
+            @click="goLogin"
+          >前往登录</button>
+          <button
+            v-else-if="facts.privacyConsent != 'current'"
+            class="btn btn-primary section"
+            hover-class="btn-primary-active"
+            @click="goPermission"
+          >前往隐私确认</button>
+          <button
+            v-else-if="facts.notificationPermission != 'authorized'"
+            :class="['btn', 'btn-primary', 'section', working ? 'btn-disabled' : '']"
+            hover-class="btn-primary-active"
+            :disabled="working"
+            @click="requestNotificationPermissionFromCtaAction"
+          >{{ working ? '正在更新…' : (facts.notificationPermission == 'denied' ? '打开系统通知设置' : '开启系统通知') }}</button>
+          <button v-else-if="facts.mobileRegistration != 'ready'" class="btn btn-primary section" hover-class="btn-primary-active" :disabled="working" @click="retryRegistration">恢复通知服务</button>
+          <text v-else class="notification-help">通知服务已就绪</text>
+
+          <notice-banner
+            v-if="facts.recoveryCode == 'privacy_consent_required'"
+            class="section"
+            tone="warning"
+            text="隐私说明已更新，请重新确认以恢复任务通知。"
+            action-text="前往确认"
+            @action="goPermission"
+          />
+
+          <view class="surface detail-list section">
+            <view class="detail-row">
+              <text class="detail-key">登录</text>
+              <text class="detail-value">{{ loginFactView(facts.login).label }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-key">隐私确认</text>
+              <text class="detail-value">{{ consentFactView(facts.privacyConsent).label }}</text>
+            </view>
+            <view class="detail-row">
+              <text class="detail-key">系统权限</text>
+              <text class="detail-value">{{ permissionView(facts.notificationPermission).label }}</text>
+            </view>
+            <view class="detail-row detail-row-last">
+              <text class="detail-key">通知服务</text>
+              <text class="detail-value">{{ mobileRegistrationFactView(facts.mobileRegistration).label }}</text>
+            </view>
+          </view>
+          <text class="notification-help">若收不到提醒，请检查系统通知权限和手机省电设置。</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import {
+  getNotificationSettings,
+  updateNotificationsEnabled
+} from '../../services/client.uts'
+import {
+  bootstrapClientRuntime,
+  getRuntimeFacts,
+  refreshMobileRegistration,
+  requestNotificationPermissionFromCta
+} from '../../services/client-runtime.uts'
+import {
+  consentFactView,
+  loginFactView,
+  mobileRegistrationFactView,
+  permissionView,
+  presentError
+} from '../../services/presentation.uts'
+import type { NotificationSettings, RuntimeFacts, UiLoadState } from '../../types/models.uts'
+
+const state = ref<UiLoadState>('loading')
+const settings = ref<NotificationSettings>({
+  notificationsEnabled: false,
+  permissionState: 'notDetermined',
+  clientRegistration: 'notStarted'
+})
+const facts = ref<RuntimeFacts>(getRuntimeFacts())
+const working = ref(false)
+const banner = ref('')
+const errorMessage = ref('')
+
+const runLoad = async (keepExisting: boolean) => {
+  if (!keepExisting) state.value = 'loading'
+  try {
+    facts.value = await bootstrapClientRuntime()
+    if (facts.value.login != 'signedIn') {
+      uni.reLaunch({ url: '/pages/login/index' })
+      return
+    }
+    if (facts.value.privacyConsent != 'current') {
+      uni.reLaunch({ url: '/pages/permission/index' })
+      return
+    }
+    settings.value = await getNotificationSettings()
+    banner.value = ''
+    state.value = 'ready'
+  } catch (error) {
+    const shown = presentError(error, '服务暂时不可用，请稍后重试。')
+    if (keepExisting) banner.value = `更新失败：${shown}`
+    else {
+      errorMessage.value = shown
+      state.value = 'error'
+    }
+  }
+}
+
+const refresh = () => {
+  runLoad(state.value == 'ready')
+}
+
+const goPermission = () => {
+  uni.redirectTo({ url: '/pages/permission/index' })
+}
+const goLogin = () => {
+  uni.reLaunch({ url: '/pages/login/index' })
+}
+
+const runToggleEnabled = async (event: UniSwitchChangeEvent) => {
+  if (working.value) return
+  const previous = settings.value.notificationsEnabled
+  settings.value.notificationsEnabled = event.detail.value
+  working.value = true
+  try {
+    settings.value = await updateNotificationsEnabled(event.detail.value)
+  } catch (error) {
+    settings.value.notificationsEnabled = previous
+    uni.showToast({ title: presentError(error, '服务暂时不可用，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const toggleEnabled = (event: UniSwitchChangeEvent) => {
+  runToggleEnabled(event)
+}
+
+const runRequestNotificationPermissionFromCtaAction = async () => {
+  if (working.value) return
+  working.value = true
+  try {
+    facts.value = await requestNotificationPermissionFromCta()
+    if (facts.value.recoveryCode == 'privacy_consent_required') goPermission()
+    else uni.showToast({ title: '通知事实已重新核对', icon: 'none' })
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '服务暂时不可用，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const requestNotificationPermissionFromCtaAction = () => {
+  runRequestNotificationPermissionFromCtaAction()
+}
+
+const runRetryRegistration = async () => {
+  if (working.value) return
+  working.value = true
+  try {
+    facts.value = await refreshMobileRegistration()
+  } catch (error) {
+    uni.showToast({ title: presentError(error, '通知服务注册失败，请稍后重试。'), icon: 'none' })
+  } finally {
+    working.value = false
+  }
+}
+
+const retryRegistration = () => {
+  runRetryRegistration()
+}
+
+onShow(() => {
+  refresh()
+})
+</script>
+
+<style lang="scss">
+.permission-focus { margin-top: 12px; padding: 16px; }
+.focus-title { margin-bottom: 6px; color: $tm-text-1; font-size: 20px; font-weight: 600; line-height: 26px; }
+.focus-detail { margin-top: 4px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.setting-row { min-height: 64px; flex-direction: row; align-items: center; }
+.setting-copy { min-width: 0; flex: 1; margin-right: 12px; }
+.setting-title { color: $tm-text-1; font-size: 14px; font-weight: 500; line-height: 21px; }
+.setting-detail { margin-top: 2px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+.detail-row-last { border-bottom-width: 0; }
+.notification-help { margin-top: 12px; color: $tm-text-3; font-size: 12px; line-height: 19px; }
+</style>

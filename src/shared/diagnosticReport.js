@@ -866,7 +866,7 @@ function renderReport(snapshot, selected) {
   const truncated = omittedClientCount + omittedLimitProviderCount + omittedRemoteGroupCount + omittedJournalCount > 0;
   const journalOmittedCount = snapshot.report.journalOmittedCount + snapshot.journal.omittedCount + omittedJournalCount;
   const lines = [
-    'Token Monitor Diagnostic Report',
+    'Token M Diagnostic Report',
     line('schemaVersion', snapshot.report.schemaVersion),
     line('redactionVersion', snapshot.report.redactionVersion),
     line('generatedAt', snapshot.report.generatedAt),

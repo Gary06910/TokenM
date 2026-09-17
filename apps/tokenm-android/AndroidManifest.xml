@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools"
+  package="${applicationId}">
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <application>
+    <meta-data
+      android:name="dcloud_push_auto_request_permission"
+      android:value="false" />
+  </application>
+</manifest>

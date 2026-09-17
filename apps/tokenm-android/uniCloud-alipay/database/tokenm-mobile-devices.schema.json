@@ -1,0 +1,45 @@
+{
+  "bsonType": "object",
+  "description": "Business-visible Android installation state; never stores a push CID.",
+  "required": [
+    "_id",
+    "ownerId",
+    "deviceId",
+    "platform",
+    "deviceLabel",
+    "pushRegistrationStatus",
+    "notificationPermissionState",
+    "appVersion",
+    "lastSeenAtMs",
+    "status",
+    "createdAtMs",
+    "updatedAtMs"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": { "bsonType": "string", "maxLength": 64 },
+    "ownerId": { "bsonType": "string", "maxLength": 240 },
+    "deviceId": { "bsonType": "string", "maxLength": 255 },
+    "platform": { "bsonType": "string", "maxLength": 32 },
+    "deviceLabel": { "bsonType": "string", "maxLength": 80 },
+    "pushRegistrationStatus": {
+      "bsonType": "string",
+      "enum": ["notStarted", "ready", "error"]
+    },
+    "notificationPermissionState": {
+      "bsonType": "string",
+      "enum": ["notDetermined", "authorized", "denied"]
+    },
+    "appVersion": { "description": "Nullable client app version.", "maxLength": 40 },
+    "lastSeenAtMs": { "bsonType": "long" },
+    "status": { "bsonType": "string", "enum": ["active", "disabled"] },
+    "createdAtMs": { "bsonType": "long" },
+    "updatedAtMs": { "bsonType": "long" }
+  }
+}

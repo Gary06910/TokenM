@@ -6,10 +6,20 @@ const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseLimitProviders
-} = require('../shared/limitCollector');
+} = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
+const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
+
+function normalizeCursorAccountIds(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((id) => String(id || '').trim())
+    .filter((id) => id && id.length <= 256))];
+}
+
+const normalizeCursorDisabledAccountIds = normalizeCursorAccountIds;
 
 const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubMode',
@@ -21,6 +31,7 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'clients',
+  'customScanPaths',
   'allTimeSince',
   'collectionIntervalMs',
   'collectionMode',
@@ -30,30 +41,61 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'projectsEnabled',
   'wslScanEnabled'
 ]);
+// Functions and identity fields deliberately stay out: this key answers only
+// whether replacing the active usage runtime would change its collection work.
+// Values arrive from usageConfigFromSettings() after mode-specific normalization.
+const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
+  'clients',
+  'customScanPaths',
+  'allTimeSince',
+  'intervalMs',
+  'historyEnabled',
+  'dailyHistoryArchiveEnabled',
+  'projectsEnabled',
+  'historyIntervalMs',
+  'watchEnabled',
+  'watchUsePolling',
+  'watchTriggersCollection',
+  'intervalRequiresActivity',
+  'watchDebounceMs',
+  'wslScanEnabled'
+]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
   'limitProviders',
   'limitsRefreshMode',
   'limitsRefreshMs',
+  'cursorDisabledAccountIds',
   'opencodeLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
+  codex: ['codexManagedAccounts'],
   opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
-  openrouter: ['openrouterProfiles'],
-  deepseek: ['deepseekApiKey'],
-  minimax: ['minimaxApiKey'],
+  cursor: ['cursorDisabledAccountIds'],
+  factory: ['factoryApiKey'],
+  kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
+  zed: ['zedCookie'],
+  commandcode: ['commandcodeCookie'],
+  mimo: ['mimoManagedAccounts'],
   zai: ['zaiApiKey', 'zaiApiRegion'],
   zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
-  volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
+  // The desktop widget auto-detects WorkBuddy when the provider itself is
+  // enabled. Token and metadata fields remain available to headless/CLI deployments.
+  workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   qoder: ['qoderCookie', 'qoderSite'],
-  commandcode: ['commandcodeCookie'],
-  kimi: ['kimiApiKey', 'kimiWebAccessToken'],
+  deepseek: ['deepseekApiKey'],
+  openrouter: ['openrouterProfiles'],
+  minimax: ['minimaxApiKey'],
+  volcengine: [
+    'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
+    'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
+  ],
   ollama: ['ollamaCookie'],
-  codex: ['codexManagedAccounts'],
-  mimo: ['mimoManagedAccounts'],
+  trae: ['traeAccessToken', 'traeDeviceId'],
+  alibaba: ['alibabaCookie', 'alibabaVariant'],
   thirdparty: ['thirdPartyProfiles']
 });
 
@@ -68,6 +110,10 @@ function changedAny(previous, next, keys) {
   return keys.some((key) => !equalSetting(previous?.[key], next?.[key]));
 }
 
+function usageConfigFingerprint(config = {}) {
+  return JSON.stringify(USAGE_CONFIG_FINGERPRINT_KEYS.map((key) => [key, config?.[key] ?? null]));
+}
+
 function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
   const raw = String(value ?? '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return fallback;
@@ -78,6 +124,7 @@ function normalizeAllTimeSince(value, fallback = DEFAULT_ALL_TIME_SINCE) {
 function usageConfigFromSettings(settings = {}, context = {}) {
   return {
     clients: clientsCsvForSetting(settings.clients),
+    customScanPaths: normalizeCustomScanPaths(settings.customScanPaths),
     allTimeSince: normalizeAllTimeSince(settings.allTimeSince),
     commandTimeoutMs: Number(context.commandTimeoutMs || 120 * 1000),
     deviceId: settings.deviceId || context.defaultDeviceId,
@@ -106,11 +153,20 @@ function usageConfigFromSettings(settings = {}, context = {}) {
 
 function limitsConfigFromSettings(settings = {}, context = {}) {
   const env = context.env || process.env;
+  // The Electron widget uses the WorkBuddy app's local sign-in state. Keep the
+  // raw token fallback available to the headless agent, but never let a desktop
+  // .env or legacy settings value silently bypass the app-owned session.
+  const workbuddySettings = context.workbuddyDesktopSessionOnly === true ? {} : settings;
+  const workbuddyEnv = context.workbuddyDesktopSessionOnly === true ? {} : env;
+  const workbuddyLocalSession = context.workbuddyLocalSession && typeof context.workbuddyLocalSession === 'object'
+    ? context.workbuddyLocalSession
+    : {};
   return {
     limitsEnabled: settings.limitsEnabled !== false,
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
     limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
+    cursorDisabledAccountIds: normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds),
     claudeWebCookie: settings.claudeWebCookie
       || env.CLAUDE_WEB_COOKIE
       || '',
@@ -124,6 +180,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     minimaxApiKey: settings.minimaxApiKey || '',
     copilotApiToken: settings.copilotApiToken || '',
     copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
+    factoryApiKey: settings.factoryApiKey || '',
     zaiApiKey: settings.zaiApiKey || '',
     zaiApiRegion: settings.zaiApiRegion || 'global',
     zaiTeamApiKey: settings.zaiTeamApiKey || '',
@@ -132,13 +189,64 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
     volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
     volcengineRegion: settings.volcengineRegion || '',
+    volcengineAgentAccessKeyId: settings.volcengineAgentAccessKeyId || '',
+    volcengineAgentSecretAccessKey: settings.volcengineAgentSecretAccessKey || '',
+    volcengineAgentRegion: settings.volcengineAgentRegion || '',
+    alibabaCookie: settings.alibabaCookie || '',
+    alibabaVariant: settings.alibabaVariant || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    traeAccessToken: settings.traeAccessToken
+      || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN
+      || env.TRAE_ACCESS_TOKEN
+      || '',
+    traeDeviceId: settings.traeDeviceId
+      || env.TOKEN_MONITOR_TRAE_DEVICE_ID
+      || env.TRAE_DEVICE_ID
+      || '',
+    zedCookie: settings.zedCookie
+      || env.TOKEN_MONITOR_ZED_COOKIE
+      || env.ZED_COOKIE
+      || '',
     commandcodeCookie: settings.commandcodeCookie || '',
+    workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
+      || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN
+      || '',
+    workbuddyUserId: workbuddySettings.workbuddyUserId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_USER_ID
+      || workbuddyEnv.WORKBUDDY_USER_ID
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.userId : '')
+      || '',
+    workbuddyEnterpriseId: workbuddySettings.workbuddyEnterpriseId
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID
+      || workbuddyEnv.WORKBUDDY_ENTERPRISE_ID
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.enterpriseId : '')
+      || '',
+    workbuddyDomain: workbuddySettings.workbuddyDomain
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DOMAIN
+      || workbuddyEnv.WORKBUDDY_DOMAIN
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.domain : '')
+      || '',
+    workbuddyDepartmentInfo: workbuddySettings.workbuddyDepartmentInfo
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO
+      || workbuddyEnv.WORKBUDDY_DEPARTMENT_INFO
+      || (context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.departmentInfo : '')
+      || '',
+    workbuddyAccountType: context.workbuddyDesktopSessionEnabled === true
+      ? workbuddyLocalSession.accountType || ''
+      : '',
+    workbuddyLocale: workbuddySettings.workbuddyLocale
+      || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
+      || workbuddyEnv.WORKBUDDY_LOCALE
+      || '',
+    workbuddyDesktopSessionSupported: context.workbuddyDesktopSessionSupported !== false,
+    workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
     kimiApiKey: settings.kimiApiKey || '',
     kimiWebAccessToken: settings.kimiWebAccessToken || '',
     ollamaCookie: settings.ollamaCookie || '',
     codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
+    antigravityManagedAccounts: context.antigravityManagedAccounts ?? settings.antigravityManagedAccounts ?? [],
     mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
     thirdPartyProfiles: settings.thirdPartyProfiles || {}
   };
@@ -187,10 +295,14 @@ function classifySettingsChange(previous = {}, next = {}) {
 
 module.exports = {
   LIMIT_PROVIDER_SETTING_KEYS,
+  USAGE_STRUCTURAL_KEYS,
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
   envelopeFromSettings,
   limitsConfigFromSettings,
   normalizeAllTimeSince,
+  normalizeCursorAccountIds,
+  normalizeCursorDisabledAccountIds,
+  usageConfigFingerprint,
   usageConfigFromSettings
 };

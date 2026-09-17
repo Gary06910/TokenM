@@ -1,0 +1,22 @@
+[
+  {
+    "IndexName": "owner_created",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "createdAtMs", "Direction": "-1", "Type": "long" }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "owner_status",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" },
+        { "Name": "status", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

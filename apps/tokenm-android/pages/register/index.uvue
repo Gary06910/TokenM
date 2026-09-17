@@ -1,0 +1,171 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="创建账户" :back="true" />
+        <view class="auth-body">
+          <text class="brand-label">Token M</text>
+          <text class="page-title">开始使用 Token M</text>
+          <text class="page-lead">账户用于关联电脑、任务记录和通知设置。</text>
+          <notice-banner v-if="errorMessage.length > 0" class="section" tone="danger" :text="errorMessage" />
+          <text class="form-label">用户名</text>
+          <input v-model="username" class="input" type="text" :maxlength="32" placeholder="3–32 个字符" placeholder-class="input-placeholder" />
+          <text class="form-label">密码</text>
+          <input v-model="password" class="input" type="text" :password="true" :maxlength="16" placeholder="8–16 位，至少包含两类字符" placeholder-class="input-placeholder" />
+          <text class="form-label">确认密码</text>
+          <input v-model="confirmPassword" class="input" type="text" :password="true" placeholder="再次输入密码" placeholder-class="input-placeholder" />
+          <text class="form-label">图形验证码</text>
+          <view class="captcha-row">
+            <input v-model="captcha" class="input captcha-input" type="text" :maxlength="6" placeholder="输入图片字符" placeholder-class="input-placeholder" />
+            <view class="captcha-refresh" hover-class="captcha-refresh-active" aria-label="刷新图形验证码" @click="reloadCaptcha">
+              <image v-if="captchaBase64.length > 0" class="captcha-image" :src="captchaBase64" mode="widthFix" @load="captchaImageLoad" @error="captchaImageError" />
+              <text v-else class="captcha-label">{{ captchaLoading ? '加载中…' : (captchaError.length > 0 ? '点击重试' : '重新加载') }}</text>
+            </view>
+          </view>
+          <text v-if="captchaError.length > 0" class="captcha-error" @click="reloadCaptcha">{{ captchaError }}</text>
+          <text class="captcha-help">输入图片中的字符；看不清时点击图片更换。</text>
+          <button :class="['btn', 'btn-primary', 'section', submitting || captchaLoading ? 'btn-disabled' : '']" hover-class="btn-primary-active" :disabled="submitting || captchaLoading" @click="submit">
+            {{ submitting ? '正在创建…' : '创建账户' }}
+          </button>
+          <button class="auth-link" @click="goLogin">已有账户？登录</button>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { createCaptcha, refreshCaptcha, registerWithUsername } from '../../services/client-runtime.uts'
+import { cloudErrorCode, presentError } from '../../services/presentation.uts'
+import {
+  registrationCaptchaShouldReload,
+  registrationPasswordError,
+  registrationUsernameError
+} from '../../services/register-policy.uts'
+
+const username = ref('')
+const password = ref('')
+const confirmPassword = ref('')
+const captcha = ref('')
+const captchaBase64 = ref('')
+const captchaLoading = ref(false)
+const captchaError = ref('')
+let captchaCreated = false
+const submitting = ref(false)
+const errorMessage = ref('')
+
+const runReloadCaptcha = async () => {
+  if (captchaLoading.value) return
+  captchaLoading.value = true
+  try {
+    const challenge = captchaCreated ? await refreshCaptcha('register') : await createCaptcha('register')
+    captchaBase64.value = challenge.captchaBase64
+    captchaError.value = ''
+    captchaCreated = true
+    captcha.value = ''
+  } catch (_error) {
+    captchaBase64.value = ''
+    captcha.value = ''
+    captchaError.value = '验证码加载失败，点击重试'
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
+const captchaImageLoad = (_event: UniImageLoadEvent) => {
+  console.info('[captcha-image] load success', captchaBase64.value.length > 0, 'svg-base64', captchaBase64.value.length)
+}
+
+const captchaImageErrorCategory = (event: UniImageErrorEvent): string => {
+  const message = event.detail.errMsg.toLowerCase()
+  if (message.includes('decode')) return 'decode'
+  if (message.includes('format')) return 'format'
+  if (message.includes('network')) return 'network'
+  return 'native-image-error'
+}
+
+const captchaImageError = (event: UniImageErrorEvent) => {
+  const sourcePresent = captchaBase64.value.length > 0
+  const sourceLength = captchaBase64.value.length
+  console.warn('[captcha-image] load error', sourcePresent, 'svg-base64', sourceLength, captchaImageErrorCategory(event))
+  captchaBase64.value = ''
+  captcha.value = ''
+  captchaError.value = '验证码加载失败，点击重试'
+}
+
+const reloadCaptcha = () => {
+  runReloadCaptcha()
+}
+
+const runSubmit = async () => {
+  if (submitting.value) return
+  const usernameError = registrationUsernameError(username.value)
+  if (usernameError.length > 0) {
+    errorMessage.value = usernameError
+    return
+  }
+  const passwordError = registrationPasswordError(password.value)
+  if (passwordError.length > 0) {
+    errorMessage.value = passwordError
+    return
+  }
+  if (confirmPassword.value != password.value) {
+    errorMessage.value = '两次输入的密码不一致。'
+    return
+  }
+  if (captchaBase64.value.length == 0 || captcha.value.trim().length == 0) {
+    errorMessage.value = '请输入图形验证码。'
+    return
+  }
+  submitting.value = true
+  errorMessage.value = ''
+  try {
+    const account = await registerWithUsername(username.value, password.value, captcha.value)
+    if (!account.authenticated) {
+      errorMessage.value = '账户已创建，但登录会话未建立。请返回登录。'
+      return
+    }
+  } catch (error) {
+    const code = cloudErrorCode(error)
+    errorMessage.value = presentError(error, '注册服务返回了未识别的错误，请稍后重试。')
+    if (registrationCaptchaShouldReload(code)) await runReloadCaptcha()
+    return
+  } finally {
+    submitting.value = false
+  }
+  uni.redirectTo({
+    url: '/pages/permission/index',
+    fail: () => {
+      errorMessage.value = '账户已创建，但无法打开下一步。请返回登录。'
+    }
+  })
+}
+
+const submit = () => {
+  runSubmit()
+}
+
+const goLogin = () => {
+  uni.redirectTo({ url: '/pages/login/index' })
+}
+
+onLoad((_options: OnLoadOptions) => {
+  reloadCaptcha()
+})
+</script>
+
+<style lang="scss">
+.auth-body { padding-top: 24px; }
+.auth-link { width: 100%; min-height: 48px; margin-top: 8px; color: $tm-info; background-color: transparent; font-size: 13px; line-height: 48px; }
+.input-placeholder { color: $tm-text-3; }
+.captcha-row { width: 100%; flex-direction: row; align-items: center; }
+.captcha-input { min-width: 0; flex: 1; }
+.captcha-refresh { width: 132px; height: 48px; margin-left: 8px; padding: 0; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: $tm-line-strong; border-radius: $tm-radius-md; background-color: $tm-surface-1; overflow: hidden; }
+.captcha-refresh-active { opacity: 0.82; }
+.captcha-image { width: 126px; height: 44px; }
+.captcha-label { color: $tm-info; font-size: 12px; line-height: 48px; text-align: center; }
+.captcha-error { margin-top: 4px; color: $tm-danger; font-size: 12px; line-height: 18px; }
+.captcha-help { margin-top: 5px; color: $tm-text-3; font-size: 12px; line-height: 18px; }
+</style>

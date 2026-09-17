@@ -1,0 +1,56 @@
+let navigationId = 0
+let target = ''
+let tappedAt = 0
+
+export const navigateColumn = (url: string): void => {
+  navigationId += 1
+  target = url
+  tappedAt = Date.now()
+  uni.reLaunch({ url })
+}
+
+// onReady/nextTick measure lifecycle/render-commit proxies, not physical pixels.
+// No payload, UID, CID or session token is logged.
+export class PageTiming {
+  id: number
+  page: string
+  start: number
+  shell = false
+  cached = false
+  fresh = false
+  cachedPending = false
+  freshPending = false
+
+  constructor(page: string) {
+    this.id = navigationId
+    this.page = page
+    this.start = target == page ? tappedAt : 0
+  }
+
+  record(metric: string): void {
+    if (this.start == 0 || this.id != navigationId) return
+    console.info('[tokenm-perf]', this.page, metric, Date.now() - this.start, 'render-proxy-ms')
+  }
+
+  shellReady(): void {
+    if (this.shell) return
+    this.shell = true
+    this.record('NAVIGATION_TO_SHELL_MS')
+    if (this.cachedPending) this.cachedReady()
+    if (this.freshPending) this.freshReady()
+  }
+
+  cachedReady(): void {
+    if (!this.shell) { this.cachedPending = true; return }
+    if (this.cached) return
+    this.cached = true
+    this.record('NAVIGATION_TO_CACHED_CONTENT_MS')
+  }
+
+  freshReady(): void {
+    if (!this.shell) { this.freshPending = true; return }
+    if (this.fresh) return
+    this.fresh = true
+    this.record('NAVIGATION_TO_FRESH_CONTENT_MS')
+  }
+}

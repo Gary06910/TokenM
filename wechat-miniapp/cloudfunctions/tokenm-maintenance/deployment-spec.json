@@ -1,0 +1,9 @@
+{
+  "functionName": "tokenm-maintenance",
+  "runtime": "Nodejs20.19",
+  "type": "Event",
+  "handler": "index.main",
+  "httpTriggers": [],
+  "timerTriggers": [],
+  "publicRoutes": []
+}

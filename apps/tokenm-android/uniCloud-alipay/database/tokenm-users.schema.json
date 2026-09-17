@@ -1,0 +1,38 @@
+{
+  "bsonType": "object",
+  "description": "Token M business settings keyed by the authenticated uni-id uid.",
+  "required": [
+    "_id",
+    "ownerId",
+    "notificationsEnabled",
+    "privacyConsentVersion",
+    "privacyConsentAtMs",
+    "createdAtMs",
+    "updatedAtMs"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": { "bsonType": "string", "maxLength": 240 },
+    "ownerId": { "bsonType": "string", "maxLength": 240 },
+    "notificationsEnabled": { "bsonType": "bool", "defaultValue": false },
+    "privacyConsentVersion": {
+      "description": "Null or the accepted internal protocol version tokenm-android-v1.",
+      "maxLength": 64,
+      "defaultValue": null
+    },
+    "privacyConsentAtMs": {
+      "description": "Nullable server epoch-millisecond acceptance time stored as a long.",
+      "defaultValue": null
+    },
+    "createdAtMs": { "bsonType": "long" },
+    "updatedAtMs": { "bsonType": "long" },
+    "historyClearedAtMs": { "description": "Nullable epoch-millisecond integer stored as a long." },
+    "deletionRequestedAtMs": { "description": "Nullable epoch-millisecond deletion request time stored as a long." }
+  }
+}

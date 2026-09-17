@@ -22,6 +22,7 @@ const {
   classifyClientSyncDetailCode,
   normalizeClientHealth
 } = require('../../src/shared/clientHealth');
+const { antigravitySyncLockPath } = require('../../src/shared/providers/antigravity/selfSync');
 const {
   clientActivityDaysFromHistory,
   clientDiagnosticRoots,
@@ -305,7 +306,9 @@ test('countOverall tallies by headline state', () => {
 // files for a reason (one needs `fs`, the other ships to the Worker), so nothing
 // but this test stops a new client's root from being silently dropped on ingest.
 test('every source-root id the collector emits is in the allowlist', () => {
-  const roots = clientSourceRoots(KNOWN_CLIENTS);
+  const roots = clientSourceRoots(KNOWN_CLIENTS, {
+    customScanPaths: { codex: [path.resolve('tmp', 'codex-extra')] }
+  });
   const emitted = new Set();
   for (const entries of Object.values(roots)) {
     for (const { id, dir } of entries) {
@@ -330,6 +333,81 @@ test('every source-root id the collector emits is in the allowlist', () => {
     if (discoveryDependent.has(id)) continue;
     assert.ok(checked.has(id), `${id} is in the allowlist but no client probes it`);
   }
+});
+
+test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const originalHomedir = os.homedir;
+  os.homedir = () => path.join(path.sep, 'home', 'alice');
+  process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, 'srv', 'claude-config');
+  try {
+    assert.deepEqual(clientSourceRoots('claude').claude, [
+      { id: 'claude-projects', dir: path.join(path.sep, 'srv', 'claude-config', 'projects') },
+      { id: 'claude-transcripts', dir: path.join(path.sep, 'srv', 'claude-config', 'transcripts') }
+    ]);
+  } finally {
+    os.homedir = originalHomedir;
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+  }
+});
+
+// The two self-synced caches resolve differently upstream and the difference is
+// load-bearing on Windows: cursor.rs hardcodes a home-relative literal, while
+// antigravity.rs routes through get_config_dir(). Assert both in one place so a
+// future tidy-up cannot quietly collapse them onto whichever one it noticed.
+test('the Cursor cache stays home-relative while Antigravity follows the config dir', () => {
+  const homeDir = 'C:\\Users\\alice';
+  const appData = 'C:\\Users\\alice\\AppData\\Roaming';
+  const env = { APPDATA: appData };
+  const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join(homeDir, '.config', 'tokscale', 'cursor-cache')
+  }]);
+  assert.deepEqual(roots.antigravity, [{
+    id: 'tokscale-antigravity-cache',
+    dir: path.join(appData, 'tokscale', 'antigravity-cache')
+  }]);
+  // The sync lock lives inside the Antigravity cache, so it has to move with it.
+  assert.equal(
+    antigravitySyncLockPath(homeDir, env, 'win32'),
+    path.join(appData, 'tokscale', 'antigravity-cache', 'sync.lock')
+  );
+});
+
+test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', () => {
+  const homeDir = 'C:\\Users\\alice';
+  const env = {
+    APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+    TOKSCALE_CONFIG_DIR: 'C:\\iso\\tokscale'
+  };
+  const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join(homeDir, '.config', 'tokscale', 'cursor-cache')
+  }]);
+  assert.deepEqual(roots.antigravity, [{
+    id: 'tokscale-antigravity-cache',
+    dir: path.join('C:\\iso\\tokscale', 'antigravity-cache')
+  }]);
+});
+
+// tokscale-core home_dir() prefers an absolute $HOME on Windows, and cursor.rs
+// builds its cache path on top of it, so the probe has to follow that redirect.
+test('the Cursor cache follows an absolute Windows HOME override', () => {
+  const roots = clientSourceRoots('cursor', {
+    homeDir: 'C:\\Users\\alice',
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming', HOME: 'D:\\profiles\\alice' }
+  });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join('D:\\profiles\\alice', '.config', 'tokscale', 'cursor-cache')
+  }]);
 });
 
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
@@ -362,6 +440,13 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
+});
+
+test('Kilo source health covers its CLI database and extension tasks', () => {
+  assert.deepEqual(
+    clientSourceChecks('kilo').kilo.map((check) => check.id),
+    ['kilo-db', 'kilocode-tasks']
+  );
 });
 
 test('Qoder CN source health requires local.db, not only its watch parent', () => {
@@ -570,6 +655,7 @@ test('sync detail classification is conservative and emits only closed codes', (
     'network-timeout',
     'permission-denied',
     'rpc-failed',
+    'sync-lock-present',
     'unknown'
   ].sort());
   assert.equal(
@@ -596,6 +682,18 @@ test('sync detail classification is conservative and emits only closed codes', (
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'HTTPS request timed out' }), 'network-timeout');
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'tokscale cursor sync timed out after 30000ms' }), null);
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'ETIMEDOUT while connecting to Cursor API' }), 'network-timeout');
+  assert.equal(
+    classifyClientSyncDetailCode({
+      client: 'antigravity',
+      text: "Error: Antigravity sync lock at '/Users/alice/.config/tokscale/antigravity-cache/sync.lock' already exists."
+    }),
+    'sync-lock-present'
+  );
+  assert.equal(
+    classifyClientSyncDetailCode({ client: 'cursor', text: 'Cursor sync lock at /tmp/sync.lock already exists.' }),
+    null,
+    'the lock code is scoped to the upstream Antigravity wording'
+  );
   assert.equal(classifyClientSyncDetailCode({ client: 'cursor', text: 'new upstream wording with no known meaning' }), null);
   assert.equal(
     classifyClientSyncDetailCode({
@@ -604,6 +702,29 @@ test('sync detail classification is conservative and emits only closed codes', (
     }),
     null
   );
+});
+
+test('Antigravity sync-lock detail replaces the generic process-exit diagnostic', () => {
+  const health = deriveClientHealth('antigravity', { clients: {} }, {
+    sourceChecks: { antigravity: [{ id: 'antigravity-ide-source', exists: true }] },
+    selfSyncThrottle: {
+      syncStatus() {
+        return {
+          state: 'failed',
+          failureCode: 'sync-exit-error',
+          failureStage: 'process-exit',
+          detailCode: 'sync-lock-present',
+          exitCode: 1
+        };
+      }
+    }
+  });
+  const entry = health.clients.antigravity;
+  assert.equal(entry.collection.syncDetailCode, 'sync-lock-present');
+  assert.deepEqual(entry.diagnostics, [
+    { code: 'sync-lock-present' },
+    { code: 'no-usage-observed' }
+  ]);
 });
 
 // lastSyncAt is the rate-limit anchor that claim() moves; a completion never

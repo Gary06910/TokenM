@@ -1,0 +1,141 @@
+import { getCurrentAccountProfile } from './auth-service.uts'
+import type { DashboardView, DesktopRecord, TaskPageResult } from '../types/models.uts'
+
+// Four bounded, memory-only snapshots. No session secrets or persistent storage.
+let owner = ''
+let session = 0
+
+class PageSnapshot<T> {
+  value: T | null = null
+  updatedAt = 0
+  revision = 0
+  expiry = 0
+  inFlight: Promise<T> | null = null
+  staleAfter: number
+
+  constructor(staleAfter: number) {
+    this.staleAfter = staleAfter
+  }
+
+  clear(): void {
+    this.value = null
+    this.updatedAt = 0
+    this.revision += 1
+    this.inFlight = null
+  }
+
+  expire(): void {
+    this.updatedAt = 0
+    this.expiry += 1
+  }
+
+  seed(value: T, expectedSession: number, expectedRevision: number): void {
+    if (!isPageCacheSessionCurrent(expectedSession) || this.revision != expectedRevision || this.inFlight != null) return
+    this.value = value
+    this.updatedAt = Date.now()
+  }
+
+  peek(): T | null {
+    getPageCacheSession()
+    return owner.length > 0 ? this.value : null
+  }
+
+  fresh(): boolean {
+    return this.peek() != null && Date.now() - this.updatedAt < this.staleAfter
+  }
+
+  read(force: boolean, loader: () => Promise<T>): Promise<T> {
+    const currentSession = getPageCacheSession()
+    if (owner.length == 0) {
+      // HBuilderX 5.24 lowers Promise.reject to UTSPromise<Unit>.
+      return new Promise<T>((_resolve, reject) => {
+        reject(new Error('page_session_unavailable'))
+      })
+    }
+    if (this.inFlight != null) return this.inFlight!
+    const cached = this.peek()
+    if (!force && cached != null && this.fresh()) return Promise.resolve(cached)
+    const revision = this.revision
+    const expiry = this.expiry
+    const task = loader().then((value: T): T => {
+      if (!isPageCacheSessionCurrent(currentSession) || revision != this.revision) {
+        throw new Error('page_data_superseded')
+      }
+      this.value = value
+      this.updatedAt = expiry == this.expiry ? Date.now() : 0
+      return value
+    }).catch((error: any | null): T => {
+      if (isPageCacheSessionCurrent(currentSession)) handleProtectedReadError(error)
+      // Promise rejection reasons are Any? in Kotlin, not necessarily Throwable.
+      // Preserve actual cloud errors (and their codes); normalize other reasons.
+      if (error instanceof Error) throw error as Error
+      throw new Error('page_read_failed')
+    })
+    this.inFlight = task
+    task.then(
+      () => { if (this.inFlight == task) this.inFlight = null },
+      () => { if (this.inFlight == task) this.inFlight = null }
+    )
+    return task
+  }
+}
+
+export const dashboardSnapshot = new PageSnapshot<DashboardView>(5000)
+export const tasksSnapshot = new PageSnapshot<TaskPageResult>(5000)
+export const desktopsSnapshot = new PageSnapshot<DesktopRecord[]>(5000)
+// Store only the remote setting. Permission and registration are live runtime facts.
+export const settingsSnapshot = new PageSnapshot<boolean>(15000)
+
+export const clearUserPageCache = (): void => {
+  session += 1
+  dashboardSnapshot.clear()
+  tasksSnapshot.clear()
+  desktopsSnapshot.clear()
+  settingsSnapshot.clear()
+}
+
+export const getPageCacheSession = (): number => {
+  const account = getCurrentAccountProfile()
+  const nextOwner = account.authenticated ? account.userId : ''
+  if (owner != nextOwner) {
+    clearUserPageCache()
+    owner = nextOwner
+  }
+  return session
+}
+
+export const isPageCacheSessionCurrent = (value: number): boolean => {
+  return getPageCacheSession() == value && owner.length > 0
+}
+
+export const handleProtectedReadError = (error: any | null): boolean => {
+  if (!(error instanceof UniCloudError)) return false
+  const raw = (error as UniCloudError).errCode
+  const code = raw == null ? '' : `${raw}`
+  const loginRequired = code == 'unauthenticated' || code.startsWith('uni-id-')
+  const consentRequired = code == 'privacy_consent_required'
+  if (!loginRequired && !consentRequired) return false
+  clearUserPageCache()
+  uni.reLaunch({ url: loginRequired ? '/pages/login/index' : '/pages/permission/index' })
+  return true
+}
+
+export const invalidateTaskViews = (): void => {
+  tasksSnapshot.clear()
+  dashboardSnapshot.clear()
+}
+
+export const expireTaskViews = (): void => {
+  tasksSnapshot.expire()
+  dashboardSnapshot.expire()
+}
+
+export const invalidateDesktopViews = (): void => {
+  desktopsSnapshot.clear()
+  invalidateTaskViews()
+}
+
+export const invalidateSettingsViews = (): void => {
+  settingsSnapshot.clear()
+  dashboardSnapshot.clear()
+}

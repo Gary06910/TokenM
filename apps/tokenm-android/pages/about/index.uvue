@@ -1,0 +1,27 @@
+<template>
+  <view class="page-shell">
+    <scroll-view class="page-scroll" direction="vertical" :show-scrollbar="false">
+      <view class="page-content">
+        <tm-header title="关于 Token M" :back="true" />
+        <view class="about-mark"><text class="about-initial">TM</text></view>
+        <text class="about-title">Token M</text>
+        <text class="about-copy">Token M 用于记录 Codex 完成事件，并在你主动开启任务通知后显示手机提醒。</text>
+        <view class="surface detail-list section">
+          <view class="detail-row"><text class="detail-key">版本</text><text class="detail-value">0.1.0</text></view>
+          <view class="detail-row detail-row-last"><text class="detail-key">送达说明</text><text class="detail-value">通知到达受系统权限、网络和手机省电设置影响。任务记录可在应用内查看。</text></view>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+</template>
+
+<script setup lang="uts">
+</script>
+
+<style lang="scss">
+.about-mark { width: 48px; height: 48px; margin-top: 24px; align-items: center; justify-content: center; border-width: 1px; border-style: solid; border-color: $tm-line-strong; border-radius: 12px; background-color: $tm-surface-1; }
+.about-initial { color: $tm-info; font-size: 16px; font-weight: 700; line-height: 22px; }
+.about-title { margin-top: 12px; color: $tm-text-1; font-size: 20px; font-weight: 600; line-height: 26px; }
+.about-copy { margin-top: 6px; color: $tm-text-2; font-size: 14px; line-height: 24px; }
+.detail-row-last { border-bottom-width: 0; }
+</style>

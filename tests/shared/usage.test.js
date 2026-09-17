@@ -10,8 +10,66 @@ const {
   mergeDeviceRecord,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
+  stripSessionTextFromDeviceRecord,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('../../src/shared/usage');
+
+test('session normalization preserves bounded titles and recognized background-review metadata', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:review': {
+      client: 'codex',
+      sessionId: 'review',
+      totalTokens: 10,
+      title: '  Review   the change  ',
+      sessionKind: 'background-review'
+    },
+    'codex:unknown': {
+      client: 'codex',
+      sessionId: 'unknown',
+      totalTokens: 5,
+      title: 'x'.repeat(200),
+      sessionKind: 'untrusted-kind'
+    }
+  } });
+
+  assert.equal(period.sessions['codex:review'].title, 'Review the change');
+  assert.equal(period.sessions['codex:review'].sessionKind, 'background-review');
+  assert.equal(period.sessions['codex:unknown'].title.length, 160);
+  assert.equal(period.sessions['codex:unknown'].sessionKind, '');
+});
+
+test('Hub ingress projection strips session text without mutating local records', () => {
+  const record = {
+    deviceId: 'macbook',
+    today: { sessions: {
+      'codex:s1': {
+        client: 'codex', sessionId: 's1', totalTokens: 10,
+        title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+        sessionKind: 'background-review'
+      }
+    } },
+    periods: { month: { sessions: {
+      'claude:s2': {
+        client: 'claude', sessionId: 's2', totalTokens: 20,
+        sessionTitle: 'Private title', customTitle: 'Private custom title', aiTitle: 'Private AI title'
+      }
+    } } }
+  };
+
+  const stripped = stripSessionTextFromDeviceRecord(record);
+
+  assert.equal(record.today.sessions['codex:s1'].title, 'Private title');
+  assert.equal(stripped.today.sessions['codex:s1'].sessionKind, 'background-review');
+  assert.deepEqual(
+    Object.keys(stripped.today.sessions['codex:s1']).sort(),
+    ['client', 'sessionId', 'sessionKind', 'totalTokens'].sort()
+  );
+  assert.deepEqual(
+    Object.keys(stripped.periods.month.sessions['claude:s2']).sort(),
+    ['client', 'sessionId', 'totalTokens'].sort()
+  );
+});
 
 function recordWithLimits(extra = {}) {
   return {
@@ -356,6 +414,73 @@ test('mergeDeviceRecord allows the same runtime to clear Copilot limits', () => 
   const merged = mergeDeviceRecord(existing, incoming);
   assert.equal(merged.limits.providers.length, 1);
   assert.equal(merged.limits.providers[0].provider, 'copilot');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
+test('mergeDeviceRecord keeps widget Factory limits when a headless agent reports no local API key', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'factory',
+          accountKey: 'sha256:factory-user',
+          accountLabel: 'Factory Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:factory-user');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Factory limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'factory', accountKey: 'sha256:factory-user', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
   assert.equal(merged.limits.providers[0].status, 'notConfigured');
 });
 
@@ -731,7 +856,7 @@ test('extractUsageFromTokscale normalizes GitHub Copilot client names', () => {
   assert.equal(period.clients.copilot, 30);
 });
 
-test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo Code, keeping Copilot distinct', () => {
+test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot distinct', () => {
   const period = extractUsageFromTokscale([
     { client: 'pi', model: 'claude-opus-4-8', totalTokens: 11 },
     { client: 'copilot', model: 'gpt-5.5', totalTokens: 13 },
@@ -742,7 +867,7 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo Code, keeping Copilo
   assert.equal(period.clients.pi, 11);
   assert.equal(period.clients.copilot, 13);
   assert.equal(period.clients.zed, 17);
-  assert.equal(period.clients.kilocode, 19);
+  assert.equal(period.clients.kilo, 19);
 });
 
 test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () => {
@@ -822,14 +947,16 @@ test('extractUsageFromTokscale keeps the canonical Command Code client id', () =
   assert.equal(period.clients.commandcode, 19);
 });
 
-test('normalizeClientName keeps kilo distinct from kilocode and maps Oh My Pi to pi', () => {
+test('normalizeClientName folds both Kilo sources together and maps both Oh My Pi ids to pi', () => {
   const period = extractUsageFromTokscale([
     { client: 'kilo', model: 'x', totalTokens: 5 },
-    { client: 'Oh My Pi', model: 'x', totalTokens: 7 }
+    { client: 'kilocode', model: 'x', totalTokens: 13 },
+    { client: 'Oh My Pi', model: 'x', totalTokens: 7 },
+    { client: 'omp', model: 'x', totalTokens: 11 }
   ]);
 
-  assert.equal(period.clients.kilo, 5);
-  assert.equal(period.clients.pi, 7);
+  assert.equal(period.clients.kilo, 18);
+  assert.equal(period.clients.pi, 18);
   assert.ok(!('kilocode' in period.clients));
 });
 
@@ -878,7 +1005,7 @@ test('extractUsageBundleFromTokscale isolates rows without a client for safe fal
   assert.equal(bundle.period.totalTokens, 7);
 });
 
-test('extractUsageFromTokscale keeps session usage grouped by client and model', () => {
+test('extractUsageFromTokscale folds disjoint Codex reasoning into the public output bucket', () => {
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
     entries: [
@@ -918,20 +1045,41 @@ test('extractUsageFromTokscale keeps session usage grouped by client and model',
   });
 
   const codex = period.sessions['codex:rollout-1'];
-  // reasoning (2) is a subset of output (5), so it is NOT added to the total:
-  // entry 1 = 10 + 5 + 100 = 115, entry 2 = 2 + 3 = 5 → 120 (reasoning still tracked separately).
-  assert.equal(codex.totalTokens, 120);
+  // Tokscale's latest JSON makes output (5) and reasoning (2) disjoint. Token
+  // Monitor's public wire keeps output reasoning-inclusive, so entry 1 is
+  // 10 + (5 + 2) + 100 = 117 and entry 2 is 2 + 3 = 5.
+  assert.equal(codex.totalTokens, 122);
   assert.equal(codex.costUsd, 0.3);
   assert.equal(codex.messageCount, 4);
   assert.equal(codex.inputTokens, 12);
-  assert.equal(codex.outputTokens, 8);
+  assert.equal(codex.outputTokens, 10);
   assert.equal(codex.cacheReadTokens, 100);
   assert.equal(codex.reasoningTokens, 2);
   assert.equal(codex.lastUsedAt, '2026-05-30T04:00:00.000Z');
-  assert.equal(codex.models['gpt-5'], 115);
+  assert.equal(codex.models['gpt-5'], 117);
   assert.equal(codex.models['gpt-4o'], 5);
-  assert.equal(codex.providers.openai, 120);
+  assert.equal(codex.providers.openai, 122);
   assert.equal(period.sessions['cursor:cursor-active'].models['cursor-auto'], 3);
+});
+
+test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
+  const period = extractUsageFromTokscale({
+    entries: [{
+      client: 'dsh',
+      sessionId: 'session-reasoning',
+      model: 'deepseek-reasoner',
+      input: 2885,
+      output: 2,
+      reasoning: 23
+    }]
+  });
+
+  assert.equal(period.totalTokens, 2910);
+  assert.equal(period.outputTokens, 25);
+  assert.equal(period.clientOutputs.dsh, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].totalTokens, 2910);
+  assert.equal(period.sessions['dsh:session-reasoning'].outputTokens, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].reasoningTokens, 23);
 });
 
 test('aggregateDevices combines session usage across devices', () => {

@@ -222,7 +222,9 @@ test('macOS tray icon downsamples the high-resolution template like provider ico
   ]);
 });
 
-test('non-macOS tray icon keeps the resized full-color app asset', () => {
+test('Linux tray icon keeps the resized full-color app asset at the unchanged square size', () => {
+  // Windows now gets its own small-icon metric branch (see
+  // trayIconSizing.test.js); Linux remains the square 20x20 catch-all.
   const calls = [];
   const resized = {};
   const image = {
@@ -231,7 +233,7 @@ test('non-macOS tray icon keeps the resized full-color app asset', () => {
   };
 
   assert.equal(buildTrayIcon({
-    platform: 'win32',
+    platform: 'linux',
     nativeImage: {
       createFromPath(iconPath) {
         calls.push(['path', iconPath]);
@@ -428,6 +430,7 @@ test('tray context menu complements the primary click with useful commands', () 
   ]);
   assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
   assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Live rate (tok/s)').checked, false);
   assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, true);
 
   template[0].click();
@@ -464,12 +467,34 @@ test('tray context menu uses the selected locale for every visible level', () =>
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
-  assert.deepEqual(template[3].submenu.slice(-2).map((item) => item.label), [
+  assert.equal(template[3].submenu.find((item) => item.label === '即時速率（tok/s）').checked, false);
+  assert.deepEqual(template[3].submenu.slice(-3).map((item) => item.label), [
+    '最低剩餘額度條',
     '僅顯示 App 圖示',
     '自訂'
   ]);
   assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
   assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
+});
+
+test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
+  const darwin = buildTrayMenuTemplate({
+    state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+    platform: 'darwin'
+  });
+  const quit = darwin.at(-1);
+  assert.equal(quit.label, 'Quit Token M');
+  assert.equal(quit.accelerator, 'Command+Q');
+  // Scoped to macOS because that is where the shortcut is worth echoing, not
+  // because a menu accelerator elsewhere would be unsafe: menu accelerators are
+  // local shortcuts, so they cannot take a key from another application.
+  for (const platform of ['win32', 'linux']) {
+    const template = buildTrayMenuTemplate({
+      state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+      platform
+    });
+    assert.equal(template.at(-1).accelerator, undefined);
+  }
 });
 
 test('tray context menu disables unavailable views', () => {
@@ -905,6 +930,83 @@ test('compact provider windows preserve Claude session plus general weekly', () 
   assert.equal(selection.secondaryWindow.label, undefined);
 });
 
+test('compact provider windows keep Codex main quotas ahead of named reserve quotas', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow.kind, 'weekly');
+  assert.equal(selection.secondaryWindow.label, undefined);
+});
+
+test('compact Codex windows do not promote an additional session over a canonical weekly quota', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'session', label: '', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'weekly');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact Codex windows do not use an additional weekly quota as a secondary window', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact Codex selection ignores providers with additional quota windows only', () => {
+  assert.equal(compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  }), null);
+});
+
+test('compact provider windows show Volcengine 5-hour plus Daily before broader windows', () => {
+  const selection = compactLimitSelection({
+    provider: 'volcengine',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'daily', remainingPercent: 60 },
+      { kind: 'weekly', remainingPercent: 50 },
+      { kind: 'billing', remainingPercent: 40 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.secondaryWindow.kind, 'daily');
+  assert.equal(selection.primaryPercent, 70);
+  assert.equal(selection.secondaryPercent, 60);
+});
+
 test('compact provider windows use billing as a final fallback and ignore non-meter rows', () => {
   const selection = compactLimitSelection({
     provider: 'cursor',
@@ -1052,6 +1154,11 @@ test('tray token text follows the shared localized unit setting', () => {
     ),
     '1.2萬 · HK$7.80'
   );
+});
+
+test('live rate is a generated tray mode with no legacy token title', () => {
+  assert.equal(isGeneratedTrayIconMode('liveTokenRate'), true);
+  assert.equal(formatTrayText({ periods: { today: { totalTokens: 12_000 } } }, 'liveTokenRate'), '');
 });
 
 test('only macOS draws a tray title beside the icon', () => {

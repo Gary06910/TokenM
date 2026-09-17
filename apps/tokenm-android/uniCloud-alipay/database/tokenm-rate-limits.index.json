@@ -1,0 +1,22 @@
+[
+  {
+    "IndexName": "scope_subject_bucket_unique",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "scope", "Direction": "1", "Type": "varchar" },
+        { "Name": "subject", "Direction": "1", "Type": "varchar" },
+        { "Name": "bucket", "Direction": "1", "Type": "long" }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "owner_id",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        { "Name": "ownerId", "Direction": "1", "Type": "varchar" }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

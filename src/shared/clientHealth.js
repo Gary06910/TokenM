@@ -25,7 +25,8 @@
 // Node-builtin-free: this module is vendored into worker/src/shared/ by
 // `npm run sync:worker`.
 
-const { REASONIX_SOURCE_CHECK_ID } = require('./reasonixPaths');
+const { REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
+const { DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 
 const CLIENT_HEALTH_VERSION = 1;
 
@@ -69,6 +70,7 @@ const CLIENT_SYNC_DETAIL_CODES = Object.freeze([
   'network-timeout',
   'network-failed',
   'authentication-failed',
+  'sync-lock-present',
   'unknown'
 ]);
 const CLIENT_SYNC_DETAIL_CODE_SET = new Set(CLIENT_SYNC_DETAIL_CODES);
@@ -147,6 +149,12 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
   ) {
     return 'rpc-failed';
   }
+  if (
+    client === 'antigravity'
+    && /antigravity sync lock at .* already exists/.test(message)
+  ) {
+    return 'sync-lock-present';
+  }
   if (/failed to connect|connection refused|connection reset|could not resolve|\bdns\b|\bnetwork\b/.test(message)) {
     return 'network-failed';
   }
@@ -164,8 +172,10 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   // installed only there has no host directory, and its usage is merged into the
   // same periods, so it has to count as a source that exists.
   'wsl-home',
+  'amp-threads',
   'antigravity-cli-data',
   'antigravity-ide-source',
+  'cherrystudio-transcripts',
   'claude-projects',
   'claude-transcripts',
   'cline-cli-sessions',
@@ -174,19 +184,24 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'codebuddy-projects',
   'codex-sessions',
   'commandcode-projects',
+  'custom-scan-path',
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'droid-sessions',
+  DSH_SOURCE_CHECK_ID,
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',
   'hermes-profile',
+  'kilo-db',
   'kilocode-tasks',
   'kimi-code-sessions',
   'kimi-sessions',
   'kiro-cli-data',
   'kiro-ide-globalstorage',
   'kiro-sessions',
+  'lmstudio-server-logs',
   'mimocode-data',
   'mimocode-orca-data',
   'omp-sessions',
@@ -199,6 +214,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'qwen-projects',
   'tokscale-antigravity-cache',
   'tokscale-cursor-cache',
+  'unsloth-db',
   'vscode-workspace-storage',
   'workbuddy-projects',
   'zcode-cli-db',
@@ -220,6 +236,7 @@ const CLIENT_HEALTH_DIAGNOSTIC_CODES = Object.freeze([
   'sync-timeout',          // self-sync was killed after its deadline
   'sync-spawn-failed',     // the self-sync subprocess could not be started
   'sync-exit-error',       // the self-sync subprocess exited non-zero
+  'sync-lock-present',     // an existing Antigravity sync lock blocked the subprocess
   'no-usage-observed',     // sources are present, all-time usage is zero
   'wsl-detected-no-data'   // a WSL marker was found but the scan returned nothing
 ]);
