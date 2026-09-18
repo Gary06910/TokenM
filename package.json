@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token M",
-  "version": "0.58.0",
+  "version": "1.0.0",
   "description": "Live token and cost widget with local-first Codex completion notifications for Token M Android.",
   "main": "src/electron/main.js",
   "scripts": {

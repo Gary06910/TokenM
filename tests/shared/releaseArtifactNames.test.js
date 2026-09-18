@@ -99,18 +99,19 @@ test('mac release scripts build native Apple Silicon and Intel artifacts with th
   assert.doesNotMatch(workflow, /latest-mac-(?:arm64|x64)\.yml/);
 
   const releaseTemplate = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
+  const historicalUpstreamVersion = '0.58.0';
   const intelBullets = releaseTemplate.split('\n').filter((line) => line.startsWith('- **macOS Intel**'));
-  const intelDmg = `Token-Monitor-${rootPackage.version}-x64.dmg`;
+  const intelDmg = `Token-Monitor-${historicalUpstreamVersion}-x64.dmg`;
   assert.equal(intelBullets.length, 5);
   assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
-  assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
+  assert.ok(intelBullets.every((line) => line.includes(`/download/v${historicalUpstreamVersion}/`)));
   const fullChangelogSummaries = releaseTemplate
     .split('\n')
     .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
   assert.equal(fullChangelogSummaries.length, 1);
   assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a>/);
   assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+/);
-  assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
+  assert.ok(fullChangelogSummaries[0].includes(`v${historicalUpstreamVersion}`));
   assert.match(
     releaseTemplate,
     /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/

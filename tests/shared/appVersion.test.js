@@ -4,10 +4,16 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const semver = require('semver');
 
 const rootPackage = require('../../package.json');
 const workerPackage = require('../../worker/package.json');
 const workerLock = require('../../worker/package-lock.json');
+
+test('Token M 1.0.0 is newer than the prior 0.58.0 installation', () => {
+  assert.equal(rootPackage.version, '1.0.0');
+  assert.equal(semver.lt('0.58.0', rootPackage.version), true);
+});
 
 test('shared app version matches the root package version', () => {
   const { appVersion } = require('../../src/shared/appVersion');

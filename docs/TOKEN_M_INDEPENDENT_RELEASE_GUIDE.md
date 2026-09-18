@@ -7,7 +7,7 @@ SOURCE_REPO: Gary06910/TokenM
 Token M Desktop is independently maintained. Original-author releases, ancestry bridges and merging upstream are not release prerequisites. Original source remains historical attribution under MIT. The Android integration and cloud API contract remain frozen for this migration.
 
 ## TOKEN_M_RELEASE_ARCHITECTURE
-VERSION_SOURCE: package.json (currently 0.45.0); no second registry.
+VERSION_SOURCE: package.json (currently 1.0.0); no second registry.
 BUILD_COMMAND: npm run dist:win:dir -- --config.directories.output=dist/<new-candidate-directory>
 WINDOWS_ARTIFACT: Token M.exe in win-unpacked; NSIS Token-Monitor-Setup-${version}.exe; portable Token-Monitor-${version}.exe. Existing artifact filenames retained; product display name is Token M.
 SIGNING: NOT_CONFIGURED; original SignPath is NOT_OWNED and disabled. Windows may show unknown publisher / SmartScreen warnings.
@@ -18,7 +18,7 @@ HOOK_SURVIVAL: fixed executable + helper path; startup validates current command
 ROLLBACK: reinstall retained prior Token M installer to same directory; preserve userData. Never roll back with original-author binaries.
 
 ## VERSIONING
-Use sensible semver in package.json and its existing lockfile root metadata. Do not jump to 1.0.0 to mark independence. Update actual release notes for each version. Do not republish an existing version with different binaries.
+Token M 1.0.0 is the first independently maintained release. Keep package.json and its existing lockfile root metadata aligned, use sensible semver for later releases, update the actual release notes for each version, and do not republish an existing version with different binaries.
 
 ## TEST / BUILD / PACKAGE
 Use Node >=22.13.0 (validated locally with 24.15.0).
@@ -27,13 +27,13 @@ Use Node >=22.13.0 (validated locally with 24.15.0).
 2. Run npm run verify (lint plus unit/integration/contract tests).
 3. Run the isolated Electron renderer acceptance helper with a new absolute output directory. It mocks IPC, blocks HTTP/HTTPS and uses its own userData; never use production credentials in automation.
 4. Run npm run dist:win:dir with a new output directory. Inspect app.asar, product metadata, update authority, Android helper inclusion, absence of WeChat runtime and private data.
-5. For a release candidate, npm run dist:win -- --config.directories.output=dist/<new-installer-candidate>. This migration validated directory packaging only; installer upgrade still needs acceptance.
+5. For a local release candidate, use the project script `npm run dist:win -- --config.directories.output=dist/<new-installer-candidate>`; it uses electron-builder with `--publish never`. The tag-triggered Windows release workflow uses `npm run dist:win:dir`, writes the updater configuration, signs the unpacked application, runs `npm run dist:win:prepackaged`, signs the installer and portable artifacts, rebuilds updater metadata, then uploads the final artifacts.
 6. Keep LICENSE and third-party notices in distribution. Never add actual .env, credentials, settings, runtime outbox or logs. Packaging explicitly excludes them, electron-updater and the unused native-install quit helper.
 
-The manually dispatched .github/workflows/release.yml is Windows build-only, with contents: read. It uploads workflow artifacts, does not create a GitHub Release, and does not call the original SignPath service. No workflow was dispatched in this migration. Historical workflow body is retained in docs/TOKEN_M_ORIGINAL_RELEASE_WORKFLOW.yml.reference; original signing scripts/XML are reference-only.
+The active `.github/workflows/release.yml` is tag-triggered: it packages macOS, Windows and Linux, then creates the GitHub Release and uploads the final artifacts. Its Windows path currently contains the configured SignPath steps; this local preparation does not dispatch the workflow, invoke SignPath, upload artifacts or create a release. No workflow was dispatched in this preparation.
 
 ## SIGNING
-Obtain a Token M owned Windows signing identity before enabling automatic installation. Do not use the original SignPath organization/policy or claim its publisher. The directory candidate was checked with Get-AuthenticodeSignature: NotSigned. Builder mentioning signtool is not evidence of a signed result.
+The local release candidate is unsigned and must be checked with `Get-AuthenticodeSignature`; builder configuration alone is not evidence of a signed result. The active GitHub workflow has an external SignPath gate, but this preparation makes no claim that the gate is available or that a local candidate is signed. Do not report the local artifact as publisher-verified.
 
 ## RELEASE
 At audit time the repository was PUBLIC and had no Releases. Build architecture and manual checking are implemented; there is no downloadable Token M release yet.

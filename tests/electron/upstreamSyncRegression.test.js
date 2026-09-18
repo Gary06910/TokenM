@@ -60,7 +60,7 @@ test('upstream-sync candidate keeps the fetched upstream package and Token M rel
   const applicationConfig = read('.github/signpath/application-artifact-configuration.xml');
   const releaseWorkflow = read('.github/workflows/release.yml');
 
-  assert.equal(packageJson.version, '0.58.0');
+  assert.equal(packageJson.version, '1.0.0');
   assert.equal(lock.packages[''].version, packageJson.version);
   assert.equal(packageJson.dependencies.tokscale, `^${manifest.baseVersion}`);
   assert.equal(packageJson.dependencies.koffi, '^3.1.5');
