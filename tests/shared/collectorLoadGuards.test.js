@@ -2036,13 +2036,17 @@ test('clientDataDirPresence requires an actual VS Code Copilot chat source', () 
     path.join('Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'plain-workspace')
   ]);
   const originalHomedir = os.homedir;
+  const originalAppData = process.env.APPDATA;
   os.homedir = () => tmp;
+  process.env.APPDATA = path.join(tmp, 'AppData', 'Roaming');
   try {
     const { clientDataDirPresence } = freshCollector();
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: false });
     fs.mkdirSync(path.join(tmp, 'Library', 'Application Support', 'Code', 'User', 'workspaceStorage', 'copilot-workspace', 'chatSessions'), { recursive: true });
     assert.deepEqual(clientDataDirPresence('copilot'), { copilot: true });
   } finally {
+    if (originalAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = originalAppData;
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
