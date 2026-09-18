@@ -10,7 +10,7 @@ Token M Desktop is independently maintained. Original-author releases, ancestry 
 VERSION_SOURCE: package.json (currently 1.0.0); no second registry.
 BUILD_COMMAND: npm run dist:win:dir -- --config.directories.output=dist/<new-candidate-directory>
 WINDOWS_ARTIFACT: Token M.exe in win-unpacked; NSIS Token-Monitor-Setup-${version}.exe; portable Token-Monitor-${version}.exe. Existing artifact filenames retained; product display name is Token M.
-SIGNING: NOT_CONFIGURED; original SignPath is NOT_OWNED and disabled. Windows may show unknown publisher / SmartScreen warnings.
+SIGNING: TOKEN_M_SIGNPATH_PENDING; upstream SignPath is NOT_OWNED and disabled. Windows local candidates may show unknown publisher / SmartScreen warnings until Token M's own signing project is approved and configured.
 RELEASE_SOURCE: https://github.com/Gary06910/TokenM/releases
 UPDATE_SOURCE: https://api.github.com/repos/Gary06910/TokenM/releases/latest
 USER_DATA_SURVIVAL: fixed appData/Token Monitor, outside install tree.
@@ -30,7 +30,7 @@ Use Node >=22.13.0 (validated locally with 24.15.0).
 5. For a local release candidate, use the project script `npm run dist:win -- --config.directories.output=dist/<new-installer-candidate>`; it uses electron-builder with `--publish never`. The tag-triggered Windows release workflow uses `npm run dist:win:dir`, writes the updater configuration, signs the unpacked application, runs `npm run dist:win:prepackaged`, signs the installer and portable artifacts, rebuilds updater metadata, then uploads the final artifacts.
 6. Keep LICENSE and third-party notices in distribution. Never add actual .env, credentials, settings, runtime outbox or logs. Packaging explicitly excludes them, electron-updater and the unused native-install quit helper.
 
-The active `.github/workflows/release.yml` is tag-triggered: it packages macOS, Windows and Linux, then creates the GitHub Release and uploads the final artifacts. Its Windows path currently contains the configured SignPath steps; this local preparation does not dispatch the workflow, invoke SignPath, upload artifacts or create a release. No workflow was dispatched in this preparation.
+The active `.github/workflows/release.yml` is tag-triggered and Windows-only for the official 1.0.0 Desktop release: it creates the GitHub Release only after the Windows application, installer and portable executable have passed the configured SignPath and Authenticode gates. macOS/Linux source and build capabilities remain outside this release workflow. This local preparation does not dispatch the workflow, invoke SignPath, upload artifacts or create a release. No workflow was dispatched in this preparation.
 
 ## SIGNING
 The local release candidate is unsigned and must be checked with `Get-AuthenticodeSignature`; builder configuration alone is not evidence of a signed result. The active GitHub workflow has an external SignPath gate, but this preparation makes no claim that the gate is available or that a local candidate is signed. Do not report the local artifact as publisher-verified.

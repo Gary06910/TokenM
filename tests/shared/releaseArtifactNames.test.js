@@ -70,33 +70,15 @@ test('updater metadata embeds every localized release-note section', () => {
   }
 });
 
-test('mac release scripts build native Apple Silicon and Intel artifacts with the Widget', () => {
+test('macOS and Linux source/build support remains available while the official release is Windows-only', () => {
   assert.deepEqual(rootPackage.build.mac.target, ['dmg', 'zip']);
   assert.match(rootPackage.scripts['dist:mac'], /--arm64/);
   assert.match(rootPackage.scripts['dist:mac:x64'], /--x64/);
 
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  assert.match(workflow, /os: macos-26\s+target: mac\s+arch: arm64\s+dist_script: dist:mac:widget/);
-  assert.match(workflow, /os: macos-26-intel\s+target: mac\s+arch: x64\s+dist_script: dist:mac:widget:x64/);
-  assert.doesNotMatch(workflow, /TOKEN_MONITOR_WIDGET_ENABLED: '0'/);
-  assert.match(workflow, /TOKEN_MONITOR_APP_GROUP: \$\{\{ matrix\.target == 'mac' && vars\.TOKEN_MONITOR_APP_GROUP \|\| '' \}\}/);
-  assert.match(workflow, /TOKEN_MONITOR_WIDGET_BUNDLE_ID: \$\{\{ matrix\.target == 'mac' && vars\.TOKEN_MONITOR_WIDGET_BUNDLE_ID \|\| '' \}\}/);
-  assert.match(workflow, /TOKEN_MONITOR_WIDGET_KIND: \$\{\{ matrix\.target == 'mac' && vars\.TOKEN_MONITOR_WIDGET_KIND \|\| '' \}\}/);
-  assert.match(workflow, /DEVELOPMENT_TEAM: \$\{\{ matrix\.target == 'mac' && vars\.DEVELOPMENT_TEAM \|\| '' \}\}/);
-  assert.match(workflow, /for name in TOKEN_MONITOR_APP_GROUP TOKEN_MONITOR_WIDGET_BUNDLE_ID TOKEN_MONITOR_WIDGET_KIND DEVELOPMENT_TEAM/);
-  assert.match(workflow, /if \[\[ "\$TOKEN_MONITOR_APP_GROUP" != group\.\* \]\]; then\s+echo "::error::Official macOS Widget releases require a group\.\* TOKEN_MONITOR_APP_GROUP"\s+exit 1/);
-  assert.match(workflow, /TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64: \$\{\{ secrets\.TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64 \}\}/);
-  assert.match(workflow, /TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64: \$\{\{ secrets\.TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64 \}\}/);
-  assert.doesNotMatch(workflow, /if \[\[ "\$TOKEN_MONITOR_APP_GROUP" != group\.\* \]\]; then\s+exit 0/);
-  assert.match(workflow, /for name in TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64 TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64/);
-  assert.match(workflow, /printf '%s' "\$TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64" \| base64 --decode > "\$app_profile"/);
-  assert.match(workflow, /printf '%s' "\$TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64" \| base64 --decode > "\$widget_profile"/);
-  assert.match(workflow, /TOKEN_MONITOR_APP_PROVISIONING_PROFILE=\$app_profile/);
-  assert.match(workflow, /TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE=\$widget_profile/);
-  assert.match(workflow, /TOKEN_MONITOR_WIDGET_DISTRIBUTION: '1'[\s\S]*TOKEN_MONITOR_WIDGET_ARCH: \$\{\{ matrix\.arch \}\}/);
-  assert.match(workflow, /npm run verify:mac:widget-app -- "\$app_path"/);
-  assert.match(workflow, /artifacts\/token-monitor-mac-arm64\/latest-mac\.yml \\\s+artifacts\/token-monitor-mac-x64\/latest-mac\.yml/);
-  assert.doesNotMatch(workflow, /latest-mac-(?:arm64|x64)\.yml/);
+  assert.match(workflow, /os: windows-latest\s+target: win/);
+  assert.doesNotMatch(workflow, /os: macos-|target: mac|target: linux/);
+  assert.doesNotMatch(workflow, /latest-mac\.yml|latest-linux\.yml|\.dmg|\.AppImage/);
 
   const releaseTemplate = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
   const historicalUpstreamVersion = '0.58.0';
@@ -118,7 +100,7 @@ test('mac release scripts build native Apple Silicon and Intel artifacts with th
   );
 });
 
-test('release workflow pins Electron only for the Linux artifact', () => {
+test('Linux Electron source-build override remains available outside the official release workflow', () => {
   assert.equal(rootPackage.devDependencies.electron, '43.4.0');
   assert.match(
     rootPackage.scripts['dist:linux'],
@@ -171,11 +153,9 @@ test('release workflow pins Electron only for the Linux artifact', () => {
   );
 
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  assert.match(workflow, /if: matrix\.target == 'linux'\s+run: \|\s+echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "\$GITHUB_ENV"/);
-  assert.match(workflow, /echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0" >> "\$GITHUB_ENV"/);
   assert.match(workflow, /- name: Verify Electron packaging version\s+run: \|\s+node -e /);
   assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
-  assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);
+  assert.doesNotMatch(workflow, /TOKEN_MONITOR_ELECTRON_TARGET=linux|TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0|matrix\.dist_script/);
 });
 
 test('release icons use source assets without the legacy generator', () => {

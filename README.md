@@ -12,12 +12,18 @@
 
 > Token M is independently maintained in [Gary06910/TokenM](https://github.com/Gary06910/TokenM). It uses [Javis603/token-monitor](https://github.com/Javis603/token-monitor) as an upstream reference and selectively adopts compatible changes; Token M owns its source of truth, releases, and update feed.
 
+## Token M 1.0.0 desktop release scope
+
+- **Official desktop binary:** Windows x64.
+- **Android:** a separate Token M mobile client; it is not built by the Desktop GitHub Release workflow.
+- **macOS/Linux:** source and build support may exist in this repository, but official macOS/Linux binary distribution is not provided in 1.0.0.
+
 <p align="center">
     <a href="https://github.com/Gary06910/TokenM/releases"><img src="https://img.shields.io/github/v/release/Gary06910/TokenM?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
     <a href="https://github.com/Gary06910/TokenM/releases"><img src="https://img.shields.io/github/downloads/Gary06910/TokenM/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
-    <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
+    <img src="https://img.shields.io/badge/macOS-source%2Fbuild-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS source/build support" />
+    <img src="https://img.shields.io/badge/Linux-source%2Fbuild-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux source/build support" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
 </p>
@@ -151,7 +157,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Local-first** — no servers needed for single-device use
 - **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
 - **iOS widget support** — Widgy and Scriptable through the Worker hub
-- **Privacy-first** — prompts, responses, source code, and file contents stay on your machine
+- **Privacy-first** — usage logs and statistics are processed locally; optional sync and Token M notifications use documented fields and user-configured destinations
 
 ### Interface & surfaces
 
@@ -167,24 +173,21 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ## Installation
 
-On macOS, install through the official [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor):
+Download the official 1.0.0 Desktop binaries from [Token M GitHub Releases](https://github.com/Gary06910/TokenM/releases):
 
-```bash
-brew install --cask token-monitor
-```
-
-Or download from [Token M GitHub Releases](https://github.com/Gary06910/TokenM/releases).
-
-- **macOS (Apple Silicon)** — `.dmg`, signed and notarized
-- **macOS (Intel)** — x64 `.dmg`, signed and notarized
-- **Windows 10/11** — setup and portable `.exe`, [code-signed](docs/code-signing.md)
-- **Linux x64** — `.AppImage`
+- **Windows 10/11 x64** — setup and portable `.exe`, [planned code-signing policy](docs/CODE_SIGNING_POLICY.md)
+- **Android** — distributed as the separate Token M mobile client
+- **macOS/Linux** — no official 1.0.0 binary distribution; source/build support remains available
 
 Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → General.
 
 ### First run
 
 Local mode is the default: launch the app and it starts tracking this device. No hub, agent, or config required.
+
+### Uninstall
+
+On Windows, use the Token M uninstaller from Windows Settings → Apps or the installation directory. Uninstalling the application does not silently delete `%APPDATA%\Token Monitor`; remove that data separately only when you intend to clear settings, credentials, usage history, pairing data, and notification outbox data.
 
 ## Multi-device sync
 
@@ -223,7 +226,7 @@ Paste the deployed URL into each device's widget at Settings → Multi-device Sy
 
 ## App data
 
-App state lives in the OS user-data dir — delete it along with the app to fully uninstall.
+App state lives in the OS user-data dir. Uninstall does not silently remove it; delete it separately only when you intend to clear the stored data.
 
 | Platform | Path |
 |----------|------|
@@ -233,7 +236,7 @@ App state lives in the OS user-data dir — delete it along with the app to full
 
 ## Build from source
 
-To build your own installer, use Node.js 22.15+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa).
+To build your own installer, use Node.js 22.15+ on the **target** OS (electron-builder can't cross-build a macOS `.dmg` on Windows, or vice-versa). macOS/Linux build commands remain source-build capabilities and are not official 1.0.0 binary distribution.
 
 ```bash
 npm install
@@ -296,7 +299,7 @@ See the [configuration reference](docs/configuration.md) for every setting and a
 
 ## Privacy
 
-Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
+Token Monitor processes usage logs and usage statistics locally and sends no analytics or telemetry to the project maintainer. It is not a pure offline application: GitHub is used for update checks, and user-enabled Token M notifications can call the configured Token M backend / uniCloud for Desktop-to-Android delivery. See the [privacy policy](docs/privacy.md) for the documented fields and other provider integrations.
 
 ## Star History
 
@@ -316,7 +319,7 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 
 - [tokscale](https://github.com/junhoyeo/tokscale) for log parsing and token accounting.
 - [CodexBar](https://github.com/steipete/CodexBar) for AI Tool Limits research.
-- [Code signing policy](docs/code-signing.md): Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+- [Token M Code signing policy](docs/CODE_SIGNING_POLICY.md): planned/intended SignPath integration; Token M has not yet been approved or signed by SignPath Foundation.
 
 ## License
 

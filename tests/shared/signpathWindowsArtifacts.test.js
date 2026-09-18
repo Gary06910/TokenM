@@ -96,31 +96,55 @@ test('SignPath configurations restrict every signed PE to the release product me
   assert.equal(pkg.build.win.signtoolOptions.publisherName, 'SignPath Foundation');
 });
 
-test('release workflow signs the application before packaging and signs public artifacts last', () => {
+test('release workflow is Windows-only, fails closed before signing, and signs public artifacts last', () => {
   const workflow = fs.readFileSync(
     path.join(PROJECT_ROOT, '.github', 'workflows', 'release.yml'),
     'utf8'
   );
   const unpacked = workflow.indexOf('npm run dist:win:dir');
-  const signApplication = workflow.indexOf('artifact-configuration-slug: application');
+  const signApplication = workflow.indexOf(
+    'artifact-configuration-slug: ${{ vars.TOKEN_M_SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG }}'
+  );
   const prepackaged = workflow.indexOf('npm run dist:win:prepackaged');
-  const signArtifacts = workflow.indexOf('artifact-configuration-slug: initial');
+  const signArtifacts = workflow.indexOf(
+    'artifact-configuration-slug: ${{ vars.TOKEN_M_SIGNPATH_RELEASE_ARTIFACT_CONFIGURATION_SLUG }}'
+  );
   const rebuildBlockmap = workflow.indexOf('node scripts/signpath-windows-artifacts.js apply-artifacts');
+  const preflight = workflow.indexOf('Preflight Token M SignPath configuration');
 
   assert.ok(unpacked >= 0);
+  assert.ok(preflight >= 0);
+  assert.ok(preflight < signApplication);
   assert.match(workflow, /path: \$\{\{ runner\.temp \}\}\/signpath-application-input\s/);
   assert.match(
     workflow,
-    /artifact-configuration-slug: application[\s\S]*?version: \$\{\{ toJSON\(steps\.prepare-unsigned-win-app\.outputs\.product_version\) \}\}/
+    /artifact-configuration-slug: \$\{\{ vars\.TOKEN_M_SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG \}\}[\s\S]*?version: \$\{\{ toJSON\(steps\.prepare-unsigned-win-app\.outputs\.product_version\) \}\}/
   );
   assert.match(
     workflow,
-    /artifact-configuration-slug: initial[\s\S]*?version: \$\{\{ toJSON\(steps\.prepare-unsigned-win\.outputs\.version\) \}\}/
+    /artifact-configuration-slug: \$\{\{ vars\.TOKEN_M_SIGNPATH_RELEASE_ARTIFACT_CONFIGURATION_SLUG \}\}[\s\S]*?version: \$\{\{ toJSON\(steps\.prepare-unsigned-win\.outputs\.version\) \}\}/
   );
   assert.ok(unpacked < signApplication);
   assert.ok(signApplication < prepackaged);
   assert.ok(prepackaged < signArtifacts);
   assert.ok(signArtifacts < rebuildBlockmap);
+  assert.match(workflow, /secrets\.TOKEN_M_SIGNPATH_API_TOKEN/);
+  for (const variable of [
+    'TOKEN_M_SIGNPATH_ORGANIZATION_ID',
+    'TOKEN_M_SIGNPATH_PROJECT_SLUG',
+    'TOKEN_M_SIGNPATH_SIGNING_POLICY_SLUG',
+    'TOKEN_M_SIGNPATH_APPLICATION_ARTIFACT_CONFIGURATION_SLUG',
+    'TOKEN_M_SIGNPATH_RELEASE_ARTIFACT_CONFIGURATION_SLUG'
+  ]) assert.match(workflow, new RegExp(`vars\\.${variable}`));
+  assert.doesNotMatch(workflow, /8bf2856b-5fb0-4c78-ba99-90931fcce837/);
+  assert.doesNotMatch(workflow, /project-slug: token-monitor/);
+  assert.doesNotMatch(workflow, /artifact-configuration-slug: (?:application|initial)/);
+  assert.doesNotMatch(workflow, /os: macos-|target: mac|target: linux/);
+  assert.doesNotMatch(workflow, /latest-mac\.yml|latest-linux\.yml|\.dmg|\.AppImage|APPLE_API|CSC_LINK/);
+  assert.match(workflow, /pattern: token-monitor-win/);
+  assert.match(workflow, /release-artifacts\/\*\.exe/);
+  assert.match(workflow, /release-artifacts\/latest\.yml/);
+  assert.match(workflow, /release-artifacts\/\*\.blockmap/);
 });
 
 function makeFixture(t) {

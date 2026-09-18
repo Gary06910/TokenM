@@ -32,7 +32,10 @@ The compare range starts at the retained upstream-baseline tag; it is not a prio
 
 - Windows installer: `Token-Monitor-Setup-1.0.0.exe`
 - Windows portable: `Token-Monitor-1.0.0.exe`
-- macOS and Linux artifacts use the configured `Token-Monitor-*` names and are published only under the Token M release repository.
+- Official desktop binary distribution: Windows x64 only.
+- Android is a separate Token M mobile client and is not part of the Desktop GitHub Release workflow.
+- macOS/Linux source and build support may exist, but official macOS/Linux binaries are not provided in 1.0.0.
+- Code signing policy: [Token M Code Signing Policy](../docs/CODE_SIGNING_POLICY.md) (planned/intended; SignPath Foundation approval is pending).
 
 <!-- app-update-notes:zh:start -->
 ### Token M 首个独立维护版本

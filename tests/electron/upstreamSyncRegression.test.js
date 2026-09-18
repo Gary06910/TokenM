@@ -125,8 +125,9 @@ test('candidate contains the current upstream feature and renderer-refactor surf
   assert.match(kimiLimits, /label: 'Monthly'/);
   assert.match(antigravityOAuth, /\[API_DAILY_BASE_URL, API_BASE_URL\]/);
   assert.match(tray, /accelerator: 'Command\+Q'/);
-  assert.match(releaseWorkflow, /macos-26/);
-  assert.match(releaseWorkflow, /macos-26-intel/);
+  assert.match(releaseWorkflow, /os: windows-latest\s+target: win/);
+  assert.doesNotMatch(releaseWorkflow, /os: macos-|target: mac|target: linux/);
+  assert.doesNotMatch(releaseWorkflow, /latest-mac\.yml|latest-linux\.yml|\.dmg|\.AppImage/);
   assert.equal(fs.existsSync(path.join(PROJECT_ROOT, 'src/electron/renderer/preferenceDragSort.js')), false);
 });
 
