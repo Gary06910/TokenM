@@ -5,6 +5,7 @@ const semver = require('semver');
 // Token M keeps upstream's updater implementation but owns the release feed.
 // This prevents a Token M build from ever installing the upstream binary.
 const GITHUB_REPO = 'Gary06910/TokenM';
+const APP_UPDATE_FEED_ID = `github:${GITHUB_REPO}`;
 const RELEASES_LATEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
 const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +26,18 @@ const RELEASE_NOTE_HTML_TAGS = new Set([
   'tr', 'u', 'ul', 'var'
 ]);
 const RELEASE_NOTE_VOID_HTML_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+function normalizeAppUpdateCache(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const ownsFeed = source.feedId === APP_UPDATE_FEED_ID;
+  return {
+    ...source,
+    feedId: APP_UPDATE_FEED_ID,
+    lastCheckedAt: ownsFeed ? (source.lastCheckedAt ?? null) : null,
+    lastKnownLatest: ownsFeed ? (source.lastKnownLatest ?? null) : null,
+    dismissedVersion: ownsFeed ? (source.dismissedVersion ?? null) : null
+  };
+}
 
 function appUpdateInstallSupport({
   isPackaged = false,
@@ -642,8 +655,10 @@ module.exports = {
   extractUpdaterReleaseNotes,
   mergeLatestReleaseMetadata,
   checkLatestRelease,
+  normalizeAppUpdateCache,
   RELEASES_LATEST_URL,
   GITHUB_REPO,
+  APP_UPDATE_FEED_ID,
   APP_UPDATE_BACKGROUND_COOLDOWN_MS,
   APP_UPDATE_OUTDATED_COOLDOWN_MS
 };

@@ -78,6 +78,20 @@ test('successful checks share one state transition that clears stale errors', ()
   assert.match(download, /rememberSuccessfulAppUpdateCheck\(\s*availability\.latest,\s*checkedAt,\s*\{ clearLatest: availability\.clearLatest \}\s*\)/);
 });
 
+test('settings loading owns the app update cache by feed and persists a narrow migration', () => {
+  const defaults = sourceBetween('function defaultSettings', 'function normalizeCollectionMode');
+  const read = sourceBetween('function readSettings', 'function cloneSettingsSnapshot');
+  const load = sourceBetween('function ensureSettingsLoaded', 'function updateRendererViewState');
+
+  assert.match(defaults, /appUpdate:\s*\{\s*feedId: APP_UPDATE_FEED_ID/);
+  assert.match(read, /const savedAppUpdate = saved\.appUpdate/);
+  assert.match(read, /const normalizedAppUpdate = normalizeAppUpdateCache\(savedAppUpdate\)/);
+  assert.match(read, /savedAppUpdate !== undefined \? \{ appUpdate: normalizedAppUpdate \} : \{\}/);
+  assert.match(load, /const appUpdateNeedsPersistence = appUpdateCacheMigrationPending/);
+  assert.match(load, /if \(codexNeedsPersistence \|\| appUpdateNeedsPersistence\)/);
+  assert.doesNotMatch(read, /app\.setPath\('userData',/);
+});
+
 test('automatic updates are opt-in and download without installing', () => {
   const defaults = sourceBetween('function defaultSettings', 'function normalizeCollectionMode');
   const automaticDownload = sourceBetween('async function maybeDownloadAutomaticAppUpdate', 'function maybeRunBackgroundUpdateCheck');

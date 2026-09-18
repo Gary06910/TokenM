@@ -146,6 +146,7 @@ const {
 } = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
+  APP_UPDATE_FEED_ID,
   classifyAppUpdateError,
   checkLatestRelease,
   deriveAppUpdateAvailability,
@@ -153,6 +154,7 @@ const {
   installFailureErrorKind,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
+  normalizeAppUpdateCache,
   providerUpdateCheckAvailability,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
@@ -425,6 +427,7 @@ let dashboardWindow = null;
 let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
+let appUpdateCacheMigrationPending = false;
 let initialLimitProvidersPending = false;
 let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
@@ -643,6 +646,7 @@ function defaultSettings() {
     antigravityManagedAccounts: [],
     mimoManagedAccounts: [],
     appUpdate: {
+      feedId: APP_UPDATE_FEED_ID,
       lastCheckedAt: null,
       lastKnownLatest: null,
       dismissedVersion: null
@@ -2073,15 +2077,22 @@ function floatingBubblePayload() {
 function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
+  const appUpdateNeedsPersistence = appUpdateCacheMigrationPending;
   const persistedCodexAccounts = settings.codexManagedAccounts;
   const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
+  const codexNeedsPersistence = JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts);
   persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
-  if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
+  if (codexNeedsPersistence) {
     settings.codexManagedAccounts = hydratedCodexAccounts;
+  }
+  if (codexNeedsPersistence || appUpdateNeedsPersistence) {
     if (!saveSettings()) {
       // Keep the runtime identity coherent even if the migration cannot be
       // persisted yet; the next ordinary settings save will retry it.
-      settings.codexManagedAccounts = hydratedCodexAccounts;
+      if (codexNeedsPersistence) settings.codexManagedAccounts = hydratedCodexAccounts;
+      appUpdateCacheMigrationPending = appUpdateNeedsPersistence;
+    } else {
+      appUpdateCacheMigrationPending = false;
     }
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -2437,6 +2448,7 @@ function migrateLegacyMimoCredentialFiles(accounts) {
 function readSettings() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   const settingsFileExisted = fs.existsSync(settingsPath);
+  appUpdateCacheMigrationPending = false;
   try {
     const defaults = defaultSettings();
     let saved = {};
@@ -2453,6 +2465,10 @@ function readSettings() {
       } catch (_) {}
     }
     const storedCredentials = loadCredentialSettings(saved);
+    const savedAppUpdate = saved.appUpdate;
+    const normalizedAppUpdate = normalizeAppUpdateCache(savedAppUpdate);
+    appUpdateCacheMigrationPending = savedAppUpdate !== undefined
+      && JSON.stringify(savedAppUpdate) !== JSON.stringify(normalizedAppUpdate);
     if (!saved.secret && defaults.secret) delete saved.secret;
     // Only recognized Token M settings may cross the historical settings file
     // boundary. This keeps retired legacy keys inert while retaining the
@@ -2460,7 +2476,12 @@ function readSettings() {
     const currentSaved = Object.fromEntries(
       Object.entries(saved).filter(([key]) => !key.startsWith('tokenM') || Object.hasOwn(defaults, key))
     );
-    const merged = { ...defaults, ...currentSaved, ...storedCredentials };
+    const merged = {
+      ...defaults,
+      ...currentSaved,
+      ...storedCredentials,
+      ...(savedAppUpdate !== undefined ? { appUpdate: normalizedAppUpdate } : {})
+    };
     merged.clients = clientsCsvForSetting(merged.clients);
     merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
     // A missing settings file is the only reliable fresh-install signal: a

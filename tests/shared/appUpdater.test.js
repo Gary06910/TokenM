@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   appUpdateInstallSupport,
+  APP_UPDATE_FEED_ID,
   checkLatestRelease,
   classifyAppUpdateError,
   deriveAppUpdateAvailability,
@@ -15,6 +16,7 @@ const {
   extractUpdaterReleaseNotes,
   latestFromUpdaterInfo,
   mergeLatestReleaseMetadata,
+  normalizeAppUpdateCache,
   parseLatestReleasePayload,
   parseTag,
   providerUpdateCheckAvailability,
@@ -50,6 +52,97 @@ test('the automatic downloader stands down once an attempt is spent', () => {
 
 test('source-mode release checks use the public GitHub page instead of the REST API', () => {
   assert.equal(RELEASES_LATEST_URL, 'https://github.com/Gary06910/TokenM/releases/latest');
+  assert.equal(APP_UPDATE_FEED_ID, 'github:Gary06910/TokenM');
+});
+
+test('legacy app update cache resets only updater-derived fields and adopts Token M ownership', () => {
+  const saved = {
+    themeColors: { accent: '#123456' },
+    tokenMAndroidDesktopId: 'android-desktop-1',
+    appUpdate: {
+      lastCheckedAt: '2026-08-01T00:00:00.000Z',
+      lastKnownLatest: {
+        version: '0.54.0',
+        htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.54.0'
+      },
+      dismissedVersion: '0.54.0'
+    }
+  };
+
+  const migrated = {
+    ...saved,
+    appUpdate: normalizeAppUpdateCache(saved.appUpdate)
+  };
+
+  assert.deepEqual(migrated.appUpdate, {
+    feedId: APP_UPDATE_FEED_ID,
+    lastCheckedAt: null,
+    lastKnownLatest: null,
+    dismissedVersion: null
+  });
+  assert.deepEqual(migrated.themeColors, saved.themeColors);
+  assert.equal(migrated.tokenMAndroidDesktopId, saved.tokenMAndroidDesktopId);
+});
+
+test('current Token M app update cache remains intact across normalization', () => {
+  const cache = {
+    feedId: APP_UPDATE_FEED_ID,
+    lastCheckedAt: '2026-08-02T00:00:00.000Z',
+    lastKnownLatest: {
+      version: '1.0.0',
+      htmlUrl: 'https://github.com/Gary06910/TokenM/releases/tag/v1.0.0'
+    },
+    dismissedVersion: '1.0.0'
+  };
+
+  assert.deepEqual(normalizeAppUpdateCache(cache), cache);
+});
+
+test('a different app update feed resets only its updater-derived cache', () => {
+  const cache = {
+    feedId: 'github:other-owner/other-repo',
+    lastCheckedAt: '2026-08-03T00:00:00.000Z',
+    lastKnownLatest: { version: '9.9.9' },
+    dismissedVersion: '9.9.9'
+  };
+
+  assert.deepEqual(normalizeAppUpdateCache(cache), {
+    feedId: APP_UPDATE_FEED_ID,
+    lastCheckedAt: null,
+    lastKnownLatest: null,
+    dismissedVersion: null
+  });
+});
+
+test('an empty Token M release feed stays unknown instead of becoming the installed version', () => {
+  assert.deepEqual(deriveAppUpdateAvailability({
+    currentVersion: '1.0.0',
+    latest: null,
+    phase: 'idle'
+  }), {
+    hasUpdate: false,
+    dismissed: false,
+    downloaded: false,
+    showUpdateNotice: false
+  });
+});
+
+test('same-version and future Token M releases keep owned release URLs and truthful availability', () => {
+  const current = providerUpdateCheckAvailability({
+    isUpdateAvailable: false,
+    updateInfo: { version: '1.0.0' }
+  }, '1.0.0');
+  const future = providerUpdateCheckAvailability({
+    isUpdateAvailable: true,
+    updateInfo: { version: '1.0.1' }
+  }, '1.0.0');
+
+  assert.equal(current.newer, false);
+  assert.equal(current.latest.version, '1.0.0');
+  assert.match(current.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/TokenM\/releases\/tag\//);
+  assert.equal(future.newer, true);
+  assert.equal(future.latest.version, '1.0.1');
+  assert.match(future.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/TokenM\/releases\/tag\//);
 });
 
 test('source-mode release checks negotiate public release JSON without authentication', async () => {
