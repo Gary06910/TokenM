@@ -51,15 +51,16 @@ test('the automatic downloader stands down once an attempt is spent', () => {
 });
 
 test('source-mode release checks use the public GitHub page instead of the REST API', () => {
-  assert.equal(RELEASES_LATEST_URL, 'https://github.com/Gary06910/TokenM/releases/latest');
-  assert.equal(APP_UPDATE_FEED_ID, 'github:Gary06910/TokenM');
+  assert.equal(RELEASES_LATEST_URL, 'https://github.com/Gary06910/ToKnow/releases/latest');
+  assert.equal(APP_UPDATE_FEED_ID, 'github:Gary06910/ToKnow');
 });
 
-test('legacy app update cache resets only updater-derived fields and adopts Token M ownership', () => {
+test('legacy Token M feed cache resets only updater-derived fields while preserving other settings', () => {
   const saved = {
     themeColors: { accent: '#123456' },
     tokenMAndroidDesktopId: 'android-desktop-1',
     appUpdate: {
+      feedId: 'github:Gary06910/TokenM',
       lastCheckedAt: '2026-08-01T00:00:00.000Z',
       lastKnownLatest: {
         version: '0.54.0',
@@ -84,13 +85,13 @@ test('legacy app update cache resets only updater-derived fields and adopts Toke
   assert.equal(migrated.tokenMAndroidDesktopId, saved.tokenMAndroidDesktopId);
 });
 
-test('current Token M app update cache remains intact across normalization', () => {
+test('current To Know app update cache remains intact across normalization', () => {
   const cache = {
     feedId: APP_UPDATE_FEED_ID,
     lastCheckedAt: '2026-08-02T00:00:00.000Z',
     lastKnownLatest: {
       version: '1.0.0',
-      htmlUrl: 'https://github.com/Gary06910/TokenM/releases/tag/v1.0.0'
+      htmlUrl: 'https://github.com/Gary06910/ToKnow/releases/tag/v1.0.0'
     },
     dismissedVersion: '1.0.0'
   };
@@ -114,7 +115,7 @@ test('a different app update feed resets only its updater-derived cache', () => 
   });
 });
 
-test('an empty Token M release feed stays unknown instead of becoming the installed version', () => {
+test('an empty To Know release feed stays unknown instead of becoming the installed version', () => {
   assert.deepEqual(deriveAppUpdateAvailability({
     currentVersion: '1.0.0',
     latest: null,
@@ -127,7 +128,7 @@ test('an empty Token M release feed stays unknown instead of becoming the instal
   });
 });
 
-test('same-version and future Token M releases keep owned release URLs and truthful availability', () => {
+test('same-version and future To Know releases keep owned release URLs and truthful availability', () => {
   const current = providerUpdateCheckAvailability({
     isUpdateAvailable: false,
     updateInfo: { version: '1.0.0' }
@@ -139,10 +140,10 @@ test('same-version and future Token M releases keep owned release URLs and truth
 
   assert.equal(current.newer, false);
   assert.equal(current.latest.version, '1.0.0');
-  assert.match(current.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/TokenM\/releases\/tag\//);
+  assert.match(current.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/ToKnow\/releases\/tag\//);
   assert.equal(future.newer, true);
   assert.equal(future.latest.version, '1.0.1');
-  assert.match(future.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/TokenM\/releases\/tag\//);
+  assert.match(future.latest.htmlUrl, /^https:\/\/github\.com\/Gary06910\/ToKnow\/releases\/tag\//);
 });
 
 test('source-mode release checks negotiate public release JSON without authentication', async () => {
@@ -733,8 +734,8 @@ test('mergeLatestReleaseMetadata preserves notes when native updater metadata om
 test('parseLatestReleasePayload returns normalized object for valid payload', () => {
   const result = parseLatestReleasePayload({
     tag_name: 'v0.1.3',
-    name: 'Token Monitor 0.1.3',
-    html_url: 'https://github.com/Gary06910/TokenM/releases/tag/v0.1.3',
+    name: 'To Know 0.1.3',
+    html_url: 'https://github.com/Gary06910/ToKnow/releases/tag/v0.1.3',
     published_at: '2026-05-26T12:00:00Z',
     body: `
 ## What's changed
@@ -748,8 +749,8 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
   assert.deepEqual(result, {
     version: '0.1.3',
     tag: 'v0.1.3',
-    name: 'Token Monitor 0.1.3',
-    htmlUrl: 'https://github.com/Gary06910/TokenM/releases/tag/v0.1.3',
+    name: 'To Know 0.1.3',
+    htmlUrl: 'https://github.com/Gary06910/ToKnow/releases/tag/v0.1.3',
     publishedAt: '2026-05-26T12:00:00Z',
     releaseNotes: {
       en: [{ title: 'Added', items: ['Release summaries in the app.'] }]
@@ -760,7 +761,7 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
 test('parseLatestReleasePayload falls back to tag when name is missing', () => {
   const result = parseLatestReleasePayload({
     tag_name: 'v0.1.3',
-    html_url: 'https://github.com/Gary06910/TokenM/releases/tag/v0.1.3'
+    html_url: 'https://github.com/Gary06910/ToKnow/releases/tag/v0.1.3'
   });
   assert.equal(result.name, 'v0.1.3');
   assert.equal(result.publishedAt, '');
@@ -778,24 +779,24 @@ test('parseLatestReleasePayload builds a trusted release URL from the validated 
     assert.equal(parseLatestReleasePayload({
     tag_name: 'v0.1.3',
     html_url: 'http://example.com'
-  }).htmlUrl, 'https://github.com/Gary06910/TokenM/releases/tag/v0.1.3');
+  }).htmlUrl, 'https://github.com/Gary06910/ToKnow/releases/tag/v0.1.3');
   assert.equal(parseLatestReleasePayload({
     tag_name: 'v0.1.3'
-  }).htmlUrl, 'https://github.com/Gary06910/TokenM/releases/tag/v0.1.3');
+  }).htmlUrl, 'https://github.com/Gary06910/ToKnow/releases/tag/v0.1.3');
 });
 
 test('latestFromUpdaterInfo normalizes provider metadata and release notes', () => {
   assert.deepEqual(latestFromUpdaterInfo({
     version: '0.40.0',
     tag: 'v0.40.0',
-    releaseName: 'Token Monitor 0.40.0',
+    releaseName: 'To Know 0.40.0',
     releaseDate: '2026-08-03T08:00:00Z',
     releaseNotes: '<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>Updater fix. (<a href="https://example.com">#183</a>)</li></ul>'
   }), {
     version: '0.40.0',
     tag: 'v0.40.0',
-    name: 'Token Monitor 0.40.0',
-    htmlUrl: 'https://github.com/Gary06910/TokenM/releases/tag/v0.40.0',
+    name: 'To Know 0.40.0',
+    htmlUrl: 'https://github.com/Gary06910/ToKnow/releases/tag/v0.40.0',
     publishedAt: '2026-08-03T08:00:00Z',
     releaseNotes: { en: [{ title: 'Fixed', items: ['Updater fix.'] }] }
   });

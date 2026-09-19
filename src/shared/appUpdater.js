@@ -2,9 +2,9 @@
 
 const semver = require('semver');
 
-// Token M keeps upstream's updater implementation but owns the release feed.
-// This prevents a Token M build from ever installing the upstream binary.
-const GITHUB_REPO = 'Gary06910/TokenM';
+// To Know keeps upstream's updater implementation but owns the release feed.
+// This prevents a To Know build from ever installing the upstream binary.
+const GITHUB_REPO = 'Gary06910/ToKnow';
 const APP_UPDATE_FEED_ID = `github:${GITHUB_REPO}`;
 const RELEASES_LATEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;

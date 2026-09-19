@@ -76,10 +76,10 @@ test('Electron exposes Android pairing without a destination selector without re
   for (const label of ['手机通知', 'Android 设备', '隐私模式', '完整模式', '解除此电脑绑定', 'Codex 完成通知']) {
     assert.match(i18n, new RegExp(label));
   }
-  for (const oldLabel of ['Token M Android notifications', 'Pair Android', 'Privacy mode', 'Full mode', 'Unpair this computer', 'Enable hook', 'Disable hook', 'pending', 'last seen']) {
+  for (const oldLabel of ['To Know Android notifications', 'Pair Android', 'Privacy mode', 'Full mode', 'Unpair this computer', 'Enable hook', 'Disable hook', 'pending', 'last seen']) {
     assert.doesNotMatch(notificationsMarkup, new RegExp(oldLabel));
   }
-  for (const oldLabel of ['Token M Android notifications', 'Pair Android', 'Privacy mode', 'Full mode', 'Unpair this computer', 'Enable hook', 'Disable hook']) {
+  for (const oldLabel of ['To Know Android notifications', 'Pair Android', 'Privacy mode', 'Full mode', 'Unpair this computer', 'Enable hook', 'Disable hook']) {
     assert.doesNotMatch(notificationSettings, new RegExp(oldLabel));
   }
   assert.doesNotMatch(html, /notificationTarget|WeChat|微信/);

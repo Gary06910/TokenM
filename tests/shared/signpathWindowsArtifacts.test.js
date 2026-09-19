@@ -21,9 +21,9 @@ const {
 } = require('../../scripts/signpath-windows-artifacts');
 
 const VERSION = '0.30.0';
-const APPLICATION = 'Token Monitor.exe';
-const INSTALLER = `Token-Monitor-Setup-${VERSION}.exe`;
-const PORTABLE = `Token-Monitor-${VERSION}.exe`;
+const APPLICATION = 'To Know.exe';
+const INSTALLER = `To-Know-Setup-${VERSION}.exe`;
+const PORTABLE = `To-Know-${VERSION}.exe`;
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const SAMPLE_YAML = [
   `version: ${VERSION}`,
@@ -72,12 +72,12 @@ test('SignPath configurations restrict every signed PE to the release product me
   ]);
   assert.deepEqual(openingTagAttributes(artifactXml, 'pe-file'), [
     {
-      path: 'installer/Token-Monitor-Setup-${version}.exe',
+      path: 'installer/To-Know-Setup-${version}.exe',
       'product-name': pkg.productName,
       'product-version': '${version}'
     },
     {
-      path: 'portable/Token-Monitor-${version}.exe',
+      path: 'portable/To-Know-${version}.exe',
       'product-name': pkg.productName,
       'product-version': '${version}'
     }
@@ -110,7 +110,7 @@ test('release workflow is Windows-only, fails closed before signing, and signs p
     'artifact-configuration-slug: ${{ vars.TOKEN_M_SIGNPATH_RELEASE_ARTIFACT_CONFIGURATION_SLUG }}'
   );
   const rebuildBlockmap = workflow.indexOf('node scripts/signpath-windows-artifacts.js apply-artifacts');
-  const preflight = workflow.indexOf('Preflight Token M SignPath configuration');
+  const preflight = workflow.indexOf('Preflight To Know SignPath configuration');
 
   assert.ok(unpacked >= 0);
   assert.ok(preflight >= 0);
@@ -160,14 +160,14 @@ function makeFixture(t) {
     JSON.stringify({
       name: 'token-monitor',
       version: VERSION,
-      productName: 'Token Monitor',
+      productName: 'To Know',
       build: {
         win: {
           verifyUpdateCodeSignature: true,
           signtoolOptions: { publisherName: 'SignPath Foundation' }
         },
-        nsis: { artifactName: 'Token-Monitor-Setup-${version}.${ext}' },
-        portable: { artifactName: 'Token-Monitor-${version}.${ext}' },
+        nsis: { artifactName: 'To-Know-Setup-${version}.${ext}' },
+        portable: { artifactName: 'To-Know-${version}.${ext}' },
         publish: [{ provider: 'github', owner: 'Javis603', repo: 'token-monitor' }]
       }
     })
@@ -216,7 +216,7 @@ test('expectedWindowsApplication resolves the branded executable from package.js
   assert.deepEqual(expectedWindowsApplication(fixture.packageJsonPath, {}), {
     version: VERSION,
     productVersion: `${VERSION}.0`,
-    productName: 'Token Monitor',
+    productName: 'To Know',
     application: APPLICATION
   });
 });

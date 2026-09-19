@@ -23,7 +23,7 @@ struct TokenMonitorWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Dashboard")
+        .configurationDisplayName("To Know Dashboard")
         .description("Usage, quota, breakdown, and activity in one dashboard.")
         .supportedFamilies([.systemLarge])
     }
@@ -36,7 +36,7 @@ struct TokenMonitorSummaryWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Summary")
+        .configurationDisplayName("To Know Summary")
         .description("Tokens, cost, and a compact trend.")
         .supportedFamilies([.systemSmall])
     }
@@ -49,7 +49,7 @@ struct TokenMonitorActivityWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Activity")
+        .configurationDisplayName("To Know Activity")
         .description("Your recent activity heatmap.")
         .supportedFamilies([.systemMedium])
     }
@@ -62,7 +62,7 @@ struct TokenMonitorBreakdownWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Breakdown")
+        .configurationDisplayName("To Know Breakdown")
         .description("Compare tools or models for one period.")
         .supportedFamilies([.systemMedium])
     }
@@ -75,7 +75,7 @@ struct TokenMonitorQuotaWidget: Widget {
                 .containerBackground(for: .widget) { WidgetBackground() }
                 .environment(\.colorScheme, .dark)
         }
-        .configurationDisplayName("Token Monitor Quota")
+        .configurationDisplayName("To Know Quota")
         .description("Subscription windows and reset times.")
         .supportedFamilies([.systemMedium])
     }
@@ -111,7 +111,7 @@ struct TokenMonitorWidgetView: View {
                 WidgetRefreshButton {
                     statusState(
                         title: WidgetL10n.text("Waiting for data"),
-                        detail: WidgetL10n.text("Open Token Monitor once")
+                        detail: WidgetL10n.text("Open To Know once")
                     )
                 }
             }

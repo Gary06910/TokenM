@@ -1,6 +1,6 @@
-# Token M Upstream Policy
+# To Know Upstream Policy
 
-Token M is an independently maintained project.
+To Know is an independently maintained project.
 
 ## Upstream reference
 
@@ -19,26 +19,26 @@ Current modernization baseline:
 - No version-number coupling.
 - Upstream is reference-only after the independent baseline.
 - Features and fixes are adopted selectively.
-- Token M-specific architecture has priority after this baseline.
+- To Know-specific architecture has priority after this baseline.
 - The quality target is `NO UNINTENTIONAL DRIFT`, not permanent zero diff.
 
-The normal adoption flow is to fetch and inspect upstream, review release notes and commits, create an adoption branch for a selected feature, analyze its dependencies, adapt it to Token M, test it, and record its provenance. The supported adoption modes are:
+The normal adoption flow is to fetch and inspect upstream, review release notes and commits, create an adoption branch for a selected feature, analyze its dependencies, adapt it to To Know, test it, and record its provenance. The supported adoption modes are:
 
 - `CLEAN_CHERRY_PICK` for an isolated commit with minimal conflict.
 - `PATCH_TRANSPLANT` for selected hunks from a broader change.
-- `DESIGN_PORT` for reimplementation of an upstream idea in the current Token M architecture.
+- `DESIGN_PORT` for reimplementation of an upstream idea in the current To Know architecture.
 
 `PATCH_TRANSPLANT` and `DESIGN_PORT` are the long-term defaults when the architectures differ.
 
 ## Source of truth and release ownership
 
-- Authoritative repository: `Gary06910/TokenM`
+- Authoritative repository target: `Gary06910/ToKnow`
 - Authoritative local worktree: `token-monitor-wechat-delivery`
-- Release owner: `Gary06910/TokenM`
-- Token M update feed: the `Gary06910/TokenM` Releases channel
+- Release owner target: `Gary06910/ToKnow`
+- To Know update feed: the `Gary06910/ToKnow` Releases channel
 
-Token M must not use a `Javis603/token-monitor` binary or release feed as its automatic update source. The updater implementation may retain applicable upstream algorithms, but release ownership and update endpoints remain Token M-specific.
+To Know must not use a `Javis603/token-monitor` binary or release feed as its automatic update source. The updater implementation may retain applicable upstream algorithms, but release ownership and update endpoints remain To Know-specific.
 
 ## Attribution
 
-Token M preserves the applicable MIT License, copyright notices, and upstream attribution. Independent branding, versioning, and release ownership do not remove the original author's license or attribution.
+To Know preserves the applicable MIT License, copyright notices, and upstream attribution. Independent branding, versioning, and release ownership do not remove the original author's license or attribution.

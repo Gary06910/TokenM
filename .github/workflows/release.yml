@@ -40,7 +40,7 @@ jobs:
         run: node scripts/ensure-vendored-tokscale.js
       - name: Verify vendored tokscale (DSH bridge)
         run: node scripts/verify-vendored-tokscale.js
-      - name: Preflight Token M SignPath configuration
+      - name: Preflight To Know SignPath configuration
         if: matrix.target == 'win'
         shell: bash
         env:

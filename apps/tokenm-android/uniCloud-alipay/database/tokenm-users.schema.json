@@ -1,6 +1,6 @@
 {
   "bsonType": "object",
-  "description": "Token M business settings keyed by the authenticated uni-id uid.",
+  "description": "To Know business settings keyed by the authenticated uni-id uid.",
   "required": [
     "_id",
     "ownerId",

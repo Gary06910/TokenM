@@ -22,7 +22,7 @@ function buildTaskCompletedNotification({ taskId, desktopName, pushClientIds } =
   );
   return {
     push_clientid: targets,
-    title: 'Token M',
+    title: 'To Know',
     content,
     payload: { taskId: safeTaskId },
     force_notification: true

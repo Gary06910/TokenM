@@ -29,7 +29,7 @@ const REQUIRED_METHODS = Object.freeze([
 
 function assertRepository(repository) {
   if (!repository || REQUIRED_METHODS.some((method) => typeof repository[method] !== 'function')) {
-    throw new TypeError('Token M repository contract is incomplete.');
+    throw new TypeError('To Know repository contract is incomplete.');
   }
   return repository;
 }

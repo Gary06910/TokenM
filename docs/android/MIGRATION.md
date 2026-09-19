@@ -6,10 +6,10 @@ Development is parallel, not dual-written:
 
 ```text
 Legacy:
-Codex -> Token M Desktop -> CloudBase -> WeChat Mini Program
+Codex -> To Know Desktop -> CloudBase -> WeChat Mini Program
 
 New path:
-Codex -> Token M Desktop -> uniCloud -> uni-push 2.0 -> Android
+Codex -> To Know Desktop -> uniCloud -> uni-push 2.0 -> Android
 ```
 
 The Stop Hook, completion normalization, Desktop core runtime, CloudBase functions, WeChat notification accounting, Mini Program, and existing WeChat credentials remain unchanged. Android code uses separate API settings, outbox storage, credential namespace, and destination selection.
@@ -35,7 +35,7 @@ All of the following must be true:
 
 ## Cutover action
 
-The user explicitly selects the Android notification destination in Token M Desktop. The selector permits one destination, so a single completion is not sent to both mobile backends. Existing WeChat credentials may remain stored for a user-directed rollback, but they are not used while Android is selected.
+The user explicitly selects the Android notification destination in To Know Desktop. The selector permits one destination, so a single completion is not sent to both mobile backends. Existing WeChat credentials may remain stored for a user-directed rollback, but they are not used while Android is selected.
 
 Do not perform this action automatically during deployment, pairing, Android login, or app installation.
 

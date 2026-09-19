@@ -785,11 +785,11 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
 
-test('macOS Widget packaging keeps the Token M app identity', () => {
+test('macOS Widget packaging keeps the To Know app identity', () => {
   assert.equal(packageJson.scripts['mac:local'], undefined);
   assert.equal(packageJson.scripts['mac:local:open'], undefined);
-  assert.equal(packageJson.productName, 'Token M');
-  assert.equal(packageJson.build.productName, 'Token M');
+  assert.equal(packageJson.productName, 'To Know');
+  assert.equal(packageJson.build.productName, 'To Know');
 });
 
 test('Widget build provenance fields are injected into the extension Info.plist', () => {
@@ -932,15 +932,15 @@ test('Widget user-facing strings are localized in five languages', () => {
     localization.stringUnit.value === 'Unlimited'
   )));
   for (const key of [
-    'Token Monitor Dashboard',
+    'To Know Dashboard',
     'Usage, quota, breakdown, and activity in one dashboard.',
-    'Token Monitor Summary',
+    'To Know Summary',
     'Tokens, cost, and a compact trend.',
-    'Token Monitor Activity',
+    'To Know Activity',
     'Your recent activity heatmap.',
-    'Token Monitor Breakdown',
+    'To Know Breakdown',
     'Compare tools or models for one period.',
-    'Token Monitor Quota',
+    'To Know Quota',
     'Subscription windows and reset times.'
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget Gallery localization for ${key}`);
@@ -963,7 +963,7 @@ test('Widget user-facing strings are localized in five languages', () => {
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget configuration localization for ${key}`);
   }
-  assert.match(widgetSource, /configurationDisplayName\("Token Monitor Dashboard"\)/);
+  assert.match(widgetSource, /configurationDisplayName\("To Know Dashboard"\)/);
   assert.match(widgetSource, /description\("Usage, quota, breakdown, and activity in one dashboard\."\)/);
   // A `LocalizedStringResource` argument only resolves on newer SDKs; keep the
   // literal form so the Widget compiles at the macOS 14 deployment target.

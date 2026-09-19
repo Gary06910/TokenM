@@ -50,8 +50,8 @@ test('release artifact templates use GitHub-safe names', () => {
   assert.deepEqual(patterns, [
     'Token-Monitor-${version}-${arch}.${ext}',
     'Token-Monitor-${version}.${ext}',
-    'Token-Monitor-Setup-${version}.${ext}',
-    'Token-Monitor-${version}.${ext}'
+    'To-Know-Setup-${version}.${ext}',
+    'To-Know-${version}.${ext}'
   ]);
   for (const pattern of patterns) assert.doesNotMatch(pattern, /\s/);
 });

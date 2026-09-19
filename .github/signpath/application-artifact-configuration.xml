@@ -5,8 +5,8 @@
   </parameters>
   <zip-file>
     <pe-file
-      path="application/Token M.exe"
-      product-name="Token M"
+      path="application/To Know.exe"
+      product-name="To Know"
       product-version="${version}">
       <authenticode-sign />
     </pe-file>

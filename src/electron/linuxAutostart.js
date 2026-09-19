@@ -34,7 +34,7 @@ function desktopFileContents(appImagePath) {
   return [
     '[Desktop Entry]',
     'Type=Application',
-    'Name=Token M',
+    'Name=To Know',
     `Exec=${quoteExecArgument(appImagePath)}`,
     'X-GNOME-Autostart-enabled=true',
     ''

@@ -2,7 +2,7 @@
   "name": "token-monitor-hub-worker",
   "private": true,
   "version": "1.0.0",
-  "description": "Cloudflare Worker deployment of the Token Monitor hub.",
+  "description": "Cloudflare Worker deployment of the To Know hub.",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -24,12 +24,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Javis603/token-monitor.git",
+    "url": "git+https://github.com/Gary06910/ToKnow.git",
     "directory": "worker"
   },
-  "homepage": "https://github.com/Javis603/token-monitor/tree/main/worker#readme",
+  "homepage": "https://github.com/Gary06910/ToKnow/tree/main/worker#readme",
   "bugs": {
-    "url": "https://github.com/Javis603/token-monitor/issues"
+    "url": "https://github.com/Gary06910/ToKnow/issues"
   },
   "devDependencies": {
     "wrangler": "^4.118.0"

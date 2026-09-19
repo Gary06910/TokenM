@@ -100,7 +100,7 @@ class UniCloudRepository {
   }
 
   async runTransaction(work) {
-    if (this.transaction) throw new Error('Nested Token M transactions are not supported.');
+    if (this.transaction) throw new Error('Nested To Know transactions are not supported.');
     const transaction = await execute(() => this.database.startTransaction());
     const repository = new UniCloudRepository({ database: transaction, transaction: true });
     try {

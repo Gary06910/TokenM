@@ -139,7 +139,7 @@ class MemoryTransaction extends MemoryRepository {
   }
 
   async runTransaction(_work) {
-    throw new Error('Nested Token M transactions are not supported.');
+    throw new Error('Nested To Know transactions are not supported.');
   }
 }
 
@@ -164,7 +164,7 @@ function cloneCollections(source) {
 
 function collectionMap(collections, collection) {
   const map = collections.get(collection);
-  if (!map) throw new TypeError(`Unknown Token M collection: ${collection}`);
+  if (!map) throw new TypeError(`Unknown To Know collection: ${collection}`);
   return map;
 }
 
