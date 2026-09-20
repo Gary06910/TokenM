@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('tokenMNotifications', {
   pairAndroid: (request) => ipcRenderer.invoke('notifications:pairAndroid', request),
   setAndroidEnabled: (enabled) => ipcRenderer.invoke('notifications:setAndroidEnabled', enabled),
   setAndroidPrivacyMode: (privacyMode) => ipcRenderer.invoke('notifications:setAndroidPrivacyMode', privacyMode),
+  clearUndelivered: () => ipcRenderer.invoke('notifications:clearUndelivered'),
+  clearOutbox: () => ipcRenderer.invoke('notifications:clearOutbox'),
   unpairAndroid: () => ipcRenderer.invoke('notifications:unpairAndroid'),
   onStatus: (callback) => {
     const listener = (_event, status) => { try { callback(status); } catch (_) {} };

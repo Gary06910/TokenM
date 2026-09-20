@@ -137,6 +137,8 @@ function createTokenMNotificationRuntime(options) {
       return publish();
     }); },
     setAndroidPrivacyMode(privacyMode) { return inLifecycle(async () => { await android.setPrivacyMode(privacyMode); return publish(); }); },
+    clearUndelivered() { return inLifecycle(async () => { await android.clearUndelivered(); return publish(); }); },
+    clearOutbox() { return inLifecycle(async () => { await android.clearOutbox(); return publish(); }); },
     unpairAndroid() { return inLifecycle(async () => { await android.unpairSelf(); await reconcileComponents(); return publish(); }); },
 
   };

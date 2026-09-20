@@ -10,7 +10,7 @@
 
   const translate = window.TokenMonitorI18n?.translate;
   const text = (key, params) => translate
-    ? translate('zh-CN', key, params)
+    ? translate(document.documentElement.lang || 'en', key, params)
     : key;
 
   const byId = (id) => document.getElementById(id);
@@ -27,6 +27,9 @@
     lastSeen: byId('tokenMNotificationLastSeen'),
     enabled: byId('tokenMNotificationEnabled'),
     privacy: Array.from(document.querySelectorAll('input[name="tokenMNotificationPrivacy"]')),
+    clearUndelivered: byId('tokenMClearUndelivered'),
+    clearOutbox: byId('tokenMClearOutbox'),
+    outboxError: byId('tokenMOutboxError'),
     unpair: byId('tokenMNotificationUnpairButton'),
     hookStatus: byId('tokenMNotificationHookStatus'),
     enableHook: byId('tokenMNotificationEnableHookButton'),
@@ -98,6 +101,17 @@
       });
       if (els.lastSeen) els.lastSeen.textContent = formatLastSeen(android.desktop?.lastSeenAt);
     }
+    const queue = android.outbox || {};
+    const undelivered = (queue.blocked || 0) + (queue.failed || 0);
+    if (els.detail && hasBinding && undelivered) els.detail.textContent += text('settings.notifications.android.undelivered', { count: undelivered });
+    for (const [button, visible] of [[els.clearUndelivered, undelivered > 0], [els.clearOutbox, queue.total > 0]]) {
+      if (button) { button.classList.toggle('hidden', !visible); button.disabled = busy; }
+    }
+    if (els.outboxError) {
+      const code = queue.lastError;
+      const reason = code === 'outbox_full' ? 'full' : queue.blocked ? 'credential' : code === 'retry_exhausted' ? 'exhausted' : code === 'expired' ? 'expired' : queue.failed ? 'rejected' : code ? 'network' : '';
+      els.outboxError.textContent = reason ? text(`settings.notifications.android.queue.${reason}`) : '';
+    }
     if (els.enabled) els.enabled.checked = android.enabled === true;
     for (const input of els.privacy) input.checked = input.value === (android.privacyMode === false ? 'full' : 'privacy');
     const hookEnabled = status?.hook?.enabled === true;
@@ -155,6 +169,13 @@
       void withBusy(() => api.setAndroidPrivacyMode(input.value !== 'full'));
     });
   }
+
+  els.clearUndelivered?.addEventListener('click', () => {
+    if (window.confirm(text('settings.notifications.android.clearConfirm'))) void withBusy(() => api.clearUndelivered());
+  });
+  els.clearOutbox?.addEventListener('click', () => {
+    if (window.confirm(text('settings.notifications.android.clearConfirm'))) void withBusy(() => api.clearOutbox());
+  });
 
   els.unpair?.addEventListener('click', () => {
     if (!window.confirm(text('settings.notifications.android.unpairConfirm'))) return;

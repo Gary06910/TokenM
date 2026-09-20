@@ -211,6 +211,8 @@
                   <label class="inline-option"><input type="radio" name="tokenMNotificationPrivacy" value="full" /> <span data-i18n="settings.notifications.android.full">完整模式</span></label>
                   <span class="settings-item-desc" data-i18n="settings.notifications.android.fullDescription">同步当前允许的任务详细信息。</span>
                 </fieldset>
+                <div class="settings-actions"><button id="tokenMClearUndelivered" type="button" class="hidden" data-i18n="settings.notifications.android.clearUndelivered"></button><button id="tokenMClearOutbox" type="button" class="hidden" data-i18n="settings.notifications.android.clearOutbox"></button></div>
+                <div id="tokenMOutboxError" class="settings-note" role="status"></div>
                 <div class="settings-actions"><button id="tokenMNotificationUnpairButton" type="button" data-i18n="settings.notifications.android.unpair">解除此电脑绑定</button></div>
               </div>
               <div class="tokenm-notification-hook">

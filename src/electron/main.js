@@ -6693,6 +6693,8 @@ app.whenReady().then(() => {
   ipcMain.handle('notifications:pairAndroid', (_event, request) => notifications.pairAndroid(request || {}));
   ipcMain.handle('notifications:setAndroidEnabled', (_event, enabled) => notifications.setAndroidEnabled(enabled));
   ipcMain.handle('notifications:setAndroidPrivacyMode', (_event, privacyMode) => notifications.setAndroidPrivacyMode(privacyMode));
+  ipcMain.handle('notifications:clearUndelivered', () => notifications.clearUndelivered());
+  ipcMain.handle('notifications:clearOutbox', () => notifications.clearOutbox());
   ipcMain.handle('notifications:unpairAndroid', () => notifications.unpairAndroid());
 
   ipcMain.handle('subscriptions:adoptOrphans', async () => {

@@ -155,6 +155,9 @@ function createAndroidNotificationRuntime(options) {
       desktop,
       outbox: {
         pending: Number.isSafeInteger(queue.pending) && queue.pending >= 0 ? queue.pending : 0,
+        blocked: queue.blocked || 0,
+        failed: queue.failed || 0,
+        total: queue.total || 0,
         lastError: queue.lastError || lastError,
         paused: queue.paused === true,
         pausedReason: queue.pausedReason || null
@@ -292,6 +295,8 @@ function createAndroidNotificationRuntime(options) {
         && currentBindingState(config) === 'bound'
         && Boolean(outbox);
     },
+    async clearUndelivered() { await outbox?.clearUndelivered(); lastError = null; return publicStatus(); },
+    async clearOutbox() { await outbox?.clearOutbox(); lastError = null; return publicStatus(); },
     identityDeviceId() { return configuration().desktopId; },
     start,
     stop,
@@ -314,6 +319,7 @@ function createAndroidNotificationRuntime(options) {
           privacyMode: config.privacyMode
         });
         return outbox.enqueue(payload).catch((error) => {
+          lastError = safeCode(error);
           if (error?.code === 'invalid_outbox') markInvalid(error, 'invalid_outbox');
           throw error;
         });

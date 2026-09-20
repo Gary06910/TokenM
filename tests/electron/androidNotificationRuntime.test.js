@@ -92,7 +92,7 @@ test('Android notification runtime pairs, queues the explicit event, and unpairs
     hook_event_name: 'Stop',
     session_id: 'session-1',
     turn_id: 'turn-1',
-    occurred_at: '2026-08-23T08:00:00.000Z',
+    occurred_at: new Date().toISOString(),
     cwd: 'C:\\private\\project',
     last_assistant_message: 'private result'
   });
@@ -299,7 +299,7 @@ test('malformed Android event acknowledgement keeps the queue and invalidates th
     hook_event_name: 'Stop',
     session_id: 'malformed-session',
     turn_id: 'turn-1',
-    occurred_at: '2026-08-23T08:00:00.000Z'
+    occurred_at: new Date().toISOString()
   });
   await eventSeen;
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -378,7 +378,7 @@ test('Android outbox identity stays isolated across unpair and re-pair', async (
     eventId: 'evt:first-session:turn-1',
     event: 'codex.task.completed',
     desktopId: DESKTOP_ID,
-    occurredAt: '2026-08-23T08:00:00.000Z',
+    occurredAt: new Date().toISOString(),
     privacyMode: true,
     sessionId: 'first-session',
     project: null,

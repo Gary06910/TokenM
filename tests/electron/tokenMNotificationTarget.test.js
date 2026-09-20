@@ -130,7 +130,7 @@ test('Stop hook ignores historical destination settings and submits Android even
     hook_event_name: 'Stop',
     session_id: 'session-android',
     turn_id: 'turn-1',
-    occurred_at: '2026-08-23T08:00:00.000Z'
+    occurred_at: new Date().toISOString()
   });
   await androidAccepted;
   assert.equal(androidEvents.length, 1);
@@ -139,7 +139,7 @@ test('Stop hook ignores historical destination settings and submits Android even
 
   await postCompletion(runtime.runtimePath, {
     hook_event_name: 'Stop', session_id: 'session-android', turn_id: 'turn-1',
-    occurred_at: '2026-08-23T08:00:00.000Z'
+    occurred_at: new Date().toISOString()
   });
   status = await runtime.getStatus();
   assert.equal(status.android.bindingState, 'bound');

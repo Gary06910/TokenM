@@ -3,11 +3,14 @@
 const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../shared/credentialStore');
 const { validateAndroidCompletionPayload } = require('./androidPayload');
 
-const VERSION = 1;
+const VERSION = 2;
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 15 * 60 * 1_000;
 const MAX_ITEMS = 1_000;
 const MAX_ATTEMPTS = 20;
+const ACTIVE_TTL_MS = 24 * 60 * 60 * 1000;
+const FAILED_RETENTION_MS = 7 * ACTIVE_TTL_MS;
+const MAX_FAILED_ITEMS = 50;
 
 function timestamp(value) {
   const result = value instanceof Date ? value.getTime() : Number(value);
@@ -38,8 +41,8 @@ function safeErrorCode(error, status) {
   return /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : 'network_error';
 }
 
-function normalizeDocument(value) {
-  if (!value || typeof value !== 'object' || value.version !== VERSION || !Array.isArray(value.items)) {
+function normalizeDocument(value, now) {
+  if (!value || typeof value !== 'object' || ![1, VERSION].includes(value.version) || !Array.isArray(value.items)) {
     throw new Error('Unsupported Android outbox document');
   }
   if (value.items.length > MAX_ITEMS) throw new Error('Android outbox is too large');
@@ -52,12 +55,14 @@ function normalizeDocument(value) {
       eventIds.add(payload.eventId);
       return {
         payload,
+        createdAt: Number.isFinite(item.createdAt) ? item.createdAt : Math.min(now, Date.parse(payload.occurredAt) || now),
+        failedAt: Number.isFinite(item.failedAt) ? item.failedAt : (item.suspended ? now : null),
         attemptCount: Number.isSafeInteger(item.attemptCount) && item.attemptCount >= 0
           ? item.attemptCount
           : 0,
         nextAttemptAt: Number.isFinite(item.nextAttemptAt) ? item.nextAttemptAt : 0,
         lastError: typeof item.lastError === 'string' ? item.lastError.slice(0, 80) : null,
-        suspended: ['credential', 'terminal'].includes(item.suspended) ? item.suspended : null
+        suspended: ['credential', 'terminal', 'retry_exhausted', 'expired'].includes(item.suspended) ? item.suspended : null
       };
     })
   };
@@ -96,19 +101,39 @@ function createAndroidOutbox({
         maxBytes: 8 * 1024 * 1024,
         mode: 0o600
       });
-      document = normalizeDocument(JSON.parse(raw));
+      document = normalizeDocument(JSON.parse(raw), currentTime());
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
     loaded = true;
+    prune();
+    persist();
   }
 
   function persist() { writePrivateJsonAtomic(filePath, document); }
 
+  function prune() {
+    const now = currentTime();
+    for (const item of document.items) {
+      if (!item.suspended && item.createdAt + ACTIVE_TTL_MS <= now) {
+        item.suspended = 'expired';
+        item.lastError = 'expired';
+        item.failedAt = item.createdAt + ACTIVE_TTL_MS;
+      }
+    }
+    const retained = document.items.filter((item) => item.suspended && item.failedAt + FAILED_RETENTION_MS > now)
+      .sort((a, b) => b.failedAt - a.failedAt).slice(0, MAX_FAILED_ITEMS);
+    const keep = new Set(retained);
+    document.items = document.items.filter((item) => !item.suspended || keep.has(item));
+  }
+
   function snapshot() {
     const firstError = document.items.find((item) => item.lastError)?.lastError || null;
     return {
-      pending: document.items.length,
+      pending: document.items.filter((item) => !item.suspended).length,
+      blocked: document.items.filter((item) => item.suspended === 'credential').length,
+      failed: document.items.filter((item) => item.suspended && item.suspended !== 'credential').length,
+      total: document.items.length,
       lastError: firstError,
       paused: Boolean(pausedReason),
       pausedReason,
@@ -129,10 +154,10 @@ function createAndroidOutbox({
 
   function schedule() {
     clearTimer();
-    if (!running || pausedReason) return;
-    const eligible = document.items.filter((item) => !item.suspended);
-    if (!eligible.length) return;
-    const earliest = Math.min(...eligible.map((item) => item.nextAttemptAt));
+    if (!running || !document.items.length) return;
+    const earliest = Math.min(...document.items.map((item) => item.suspended
+      ? item.failedAt + FAILED_RETENTION_MS
+      : Math.min(pausedReason ? Infinity : item.nextAttemptAt, item.createdAt + ACTIVE_TTL_MS)));
     timer = setTimeout(() => {
       timer = null;
       api.flush().catch((error) => logger.warn?.('Android outbox flush failed', {
@@ -152,10 +177,13 @@ function createAndroidOutbox({
 
   async function flushDue() {
     load();
-    if (pausedReason) return snapshot();
+    prune();
+    persist();
+    if (pausedReason) { schedule(); return snapshot(); }
     const attempted = new Set();
     while (true) {
       if (pausedReason) break;
+      prune();
       const index = document.items.findIndex((item) => (
         !item.suspended
         && !attempted.has(item.payload.eventId)
@@ -184,6 +212,7 @@ function createAndroidOutbox({
           const bounded = Number.isFinite(randomValue) ? Math.max(0, Math.min(1, randomValue)) : 0.5;
           item.nextAttemptAt = currentTime() + Math.round(nominal * bounded);
         } else {
+          item.failedAt = currentTime();
           item.suspended = outcome.kind;
           if (outcome.kind === 'retry') {
             item.suspended = 'terminal';
@@ -191,6 +220,7 @@ function createAndroidOutbox({
           }
         }
       }
+      prune();
       persist();
     }
     schedule();
@@ -201,11 +231,15 @@ function createAndroidOutbox({
     enqueue(payload) {
       return enqueueInLane(() => {
         load();
+        prune();
+        persist();
         const clean = validateAndroidCompletionPayload(payload);
         if (!document.items.some((item) => item.payload.eventId === clean.eventId)) {
-          if (document.items.length >= MAX_ITEMS) throw new Error('Android outbox is full');
+          if (document.items.length >= MAX_ITEMS) throw Object.assign(new Error('outbox_full'), { code: 'outbox_full' });
           document.items.push({
             payload: clean,
+            createdAt: Math.min(currentTime(), Date.parse(clean.occurredAt) || currentTime()),
+            failedAt: null,
             attemptCount: 0,
             nextAttemptAt: currentTime(),
             lastError: null,
@@ -234,6 +268,25 @@ function createAndroidOutbox({
     flush() {
       return enqueueInLane(flushDue);
     },
+    clearUndelivered() {
+      return enqueueInLane(() => {
+        load();
+        prune();
+        document.items = document.items.filter((item) => !item.suspended);
+        persist();
+        schedule();
+        return snapshot();
+      });
+    },
+    clearOutbox() {
+      return enqueueInLane(() => {
+        load();
+        document.items = [];
+        persist();
+        schedule();
+        return snapshot();
+      });
+    },
     stop() {
       running = false;
       clearTimer();
@@ -241,8 +294,7 @@ function createAndroidOutbox({
     },
     pause(reason = 'invalid') {
       pausedReason = safeErrorCode({ code: reason });
-      running = false;
-      clearTimer();
+      schedule();
       return snapshot();
     },
     load() { load(); return snapshot(); },
@@ -253,6 +305,10 @@ function createAndroidOutbox({
 
 module.exports = {
   MAX_ATTEMPTS,
+  MAX_ITEMS,
+  ACTIVE_TTL_MS,
+  FAILED_RETENTION_MS,
+  MAX_FAILED_ITEMS,
   classifyAndroidDelivery,
   createAndroidOutbox
 };

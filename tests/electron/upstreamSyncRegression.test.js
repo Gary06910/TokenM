@@ -37,7 +37,7 @@ function completion(turnId = 'turn-1') {
     model: 'gpt-5',
     last_assistant_message: 'local completion summary',
     duration_ms: 42,
-    occurred_at: '2026-09-15T00:00:00.000Z'
+    occurred_at: new Date().toISOString()
   };
 }
 
