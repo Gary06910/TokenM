@@ -32,9 +32,9 @@
     outboxError: byId('tokenMOutboxError'),
     unpair: byId('tokenMNotificationUnpairButton'),
     hookStatus: byId('tokenMNotificationHookStatus'),
-    enableHook: byId('tokenMNotificationEnableHookButton'),
-    disableHook: byId('tokenMNotificationDisableHookButton'),
+    hookEnabled: byId('tokenMNotificationHookEnabled'),
     trust: byId('tokenMNotificationTrustNote'),
+    copyHooks: byId('tokenMNotificationCopyHooksButton'),
     action: byId('tokenMNotificationActionStatus')
   };
   if (!els.root) return;
@@ -62,6 +62,16 @@
 
   function errorMessage(error) {
     const code = String(error?.code || '').trim().toLowerCase();
+    const raw = `${code} ${String(error?.message || '')}`.toLowerCase();
+    if (raw.includes('notifications_not_configured') || raw.includes('android_credential_invalid')) {
+      return text('settings.notifications.hookAndroidRequired');
+    }
+    if (/eacces|eperm|erofs|permission|read-only/.test(raw)) {
+      return text('settings.notifications.hookPermissionError');
+    }
+    if (/hooks\.json|json|regular file|malformed/.test(raw)) {
+      return text('settings.notifications.hookMalformedError');
+    }
     if (['invalid_code', 'invalid_pairing_code', 'pairing_code_invalid'].includes(code)) {
       return text('settings.notifications.android.invalidCode');
     }
@@ -114,18 +124,29 @@
     }
     if (els.enabled) els.enabled.checked = android.enabled === true;
     for (const input of els.privacy) input.checked = input.value === (android.privacyMode === false ? 'full' : 'privacy');
-    const hookEnabled = status?.hook?.enabled === true;
-    if (els.hookStatus) els.hookStatus.textContent = hookEnabled
-      ? text('settings.notifications.hookEnabled')
-      : text('settings.notifications.hookDisabled');
-    els.enableHook?.classList.toggle('hidden', hookEnabled);
-    els.disableHook?.classList.toggle('hidden', !hookEnabled);
-    if (els.enableHook) els.enableHook.disabled = android.configured !== true || bindingState !== 'bound' || busy;
-    if (els.disableHook) els.disableHook.disabled = busy;
+    const hookState = String(status?.hook?.status || '').trim();
+    const desiredHookEnabled = settings.tokenMCodexHookEnabled === true;
+    const hookLabelKey = hookState === 'active'
+      ? 'settings.notifications.hookActive'
+      : hookState === 'needsTrust'
+        ? 'settings.notifications.hookNeedsTrust'
+        : hookState === 'configured'
+          ? 'settings.notifications.hookConfigured'
+          : hookState === 'error'
+            ? 'settings.notifications.hookError'
+            : desiredHookEnabled
+              ? 'settings.notifications.hookConfigured'
+              : 'settings.notifications.hookDisabled';
+    if (els.hookStatus) els.hookStatus.textContent = text(hookLabelKey);
+    if (els.hookEnabled) {
+      els.hookEnabled.checked = desiredHookEnabled;
+      els.hookEnabled.disabled = busy;
+    }
     if (els.pair) els.pair.disabled = busy || bindingState === 'pairing';
     if (els.enabled) els.enabled.disabled = busy || android.configured !== true || bindingState !== 'bound';
     if (els.unpair) els.unpair.disabled = busy || !hasBinding;
-    els.trust?.classList.toggle('hidden', !hookEnabled || status?.hook?.needsTrust !== true);
+    els.trust?.classList.toggle('hidden', hookState !== 'needsTrust' && status?.hook?.needsTrust !== true);
+    if (status?.hook?.error && !busy) setAction(errorMessage(new Error(status.hook.error)), true);
   }
 
   async function withBusy(action) {
@@ -182,8 +203,18 @@
     void withBusy(() => api.unpairAndroid());
   });
 
-  els.enableHook?.addEventListener('click', () => void withBusy(() => api.enableCodexHook()));
-  els.disableHook?.addEventListener('click', () => void withBusy(() => api.disableCodexHook()));
+  els.hookEnabled?.addEventListener('change', () => {
+    const enabled = els.hookEnabled.checked;
+    void withBusy(() => enabled ? api.enableCodexHook() : api.disableCodexHook());
+  });
+  els.copyHooks?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText('/hooks');
+      setAction(text('settings.notifications.copiedHooks'));
+    } catch (error) {
+      setAction(errorMessage(error), true);
+    }
+  });
 
   api.onStatus?.((next) => {
     status = next || {};

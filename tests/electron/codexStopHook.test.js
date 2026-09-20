@@ -118,3 +118,21 @@ test('refuses a hooks.json reported as a symlink', (t) => {
   assert.equal(state.enabled, false);
   assert.match(state.error, /regular file/);
 });
+
+test('returns a safe actionable error when hooks.json cannot be replaced', (t) => {
+  const { codexHome } = fixture(t);
+  const fsApi = Object.create(fs);
+  fsApi.renameSync = () => {
+    const error = new Error('access denied');
+    error.code = 'EACCES';
+    throw error;
+  };
+  const state = enableCodexStopHook({
+    codexHome,
+    command: 'token-m-hook',
+    fs: fsApi
+  });
+  assert.equal(state.enabled, false);
+  assert.match(state.error, /access denied/);
+  assert.equal(fs.existsSync(path.join(codexHome, 'hooks.json')), false);
+});

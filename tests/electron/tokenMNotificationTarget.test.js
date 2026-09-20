@@ -110,12 +110,18 @@ test('Stop hook ignores historical destination settings and submits Android even
   const androidOutbox = androidOutboxFilePath(directory, ANDROID_DESKTOP);
   const wechatOutbox = path.join(directory, 'token-m-wechat-outbox.json');
   const hooksPath = path.join(codexHome, 'hooks.json');
+  const hookDirectory = path.join(directory, 'codex-hook');
+  const hookLauncherPath = path.join(hookDirectory, 'launcher.ps1');
+  const hookManifestPath = path.join(hookDirectory, 'target.json');
   t.after(async () => {
     try { await runtime.disableCodexHook(); } catch (_) {}
     await runtime.stop();
     if (fs.existsSync(androidOutbox)) fs.unlinkSync(androidOutbox);
     if (fs.existsSync(wechatOutbox)) fs.unlinkSync(wechatOutbox);
     if (fs.existsSync(hooksPath)) fs.unlinkSync(hooksPath);
+    if (fs.existsSync(hookLauncherPath)) fs.unlinkSync(hookLauncherPath);
+    if (fs.existsSync(hookManifestPath)) fs.unlinkSync(hookManifestPath);
+    if (fs.existsSync(hookDirectory)) fs.rmdirSync(hookDirectory);
     fs.rmdirSync(codexHome);
     fs.rmdirSync(directory);
   });
