@@ -15,7 +15,7 @@
 
   function viewIds(views) {
     return (views || [])
-      .map((view) => normalizeId(typeof view === 'string' ? view : view?.id))
+      .map((view) => String(typeof view === 'string' ? view : view?.id || '').trim())
       .filter(Boolean);
   }
 
@@ -29,31 +29,39 @@
 
   function normalizeViewDisplayOrder(value, views) {
     const known = viewIds(views);
-    const knownSet = new Set(known);
+    const knownSet = new Set(known.map((id) => normalizeId(id)));
     const seen = new Set();
     const order = [];
     for (const item of csvItems(value)) {
-      const id = normalizeId(item);
-      if (!knownSet.has(id) || seen.has(id)) continue;
+      const key = normalizeId(item);
+      const id = known.find((candidate) => normalizeId(candidate) === key) || '';
+      if (!id || !knownSet.has(key) || seen.has(id)) continue;
       seen.add(id);
       order.push(id);
     }
-    for (const id of known) {
+    for (const view of views || []) {
+      const id = String(typeof view === 'string' ? view : view?.id || '').trim();
       if (seen.has(id)) continue;
       seen.add(id);
-      order.push(id);
+      const insertBefore = String(typeof view === 'string' ? '' : view?.insertBefore || '').trim();
+      const insertIndex = insertBefore
+        ? order.findIndex((candidate) => normalizeId(candidate) === normalizeId(insertBefore))
+        : -1;
+      if (insertIndex >= 0) order.splice(insertIndex, 0, id);
+      else order.push(id);
     }
     return order;
   }
 
   function normalizeHiddenViews(value, views) {
     const known = viewIds(views);
-    const knownSet = new Set(known);
+    const knownSet = new Set(known.map((id) => normalizeId(id)));
     const seen = new Set();
     const hidden = [];
     for (const item of csvItems(value)) {
-      const id = normalizeId(item);
-      if (!knownSet.has(id) || seen.has(id)) continue;
+      const key = normalizeId(item);
+      const id = known.find((candidate) => normalizeId(candidate) === key) || '';
+      if (!id || !knownSet.has(key) || seen.has(id)) continue;
       seen.add(id);
       hidden.push(id);
     }
@@ -62,12 +70,14 @@
 
   function orderedViews(views, value) {
     const byId = new Map((views || []).map((view) => [normalizeId(view?.id), view]));
-    return normalizeViewDisplayOrder(value, views).map((id) => byId.get(id)).filter(Boolean);
+    return normalizeViewDisplayOrder(value, views)
+      .map((id) => byId.get(normalizeId(id)))
+      .filter(Boolean);
   }
 
   function moveViewDisplayOrder(value, views, viewId, direction) {
     const order = normalizeViewDisplayOrder(value, views);
-    const from = order.indexOf(normalizeId(viewId));
+    const from = order.findIndex((id) => normalizeId(id) === normalizeId(viewId));
     const offset = direction === 'up' ? -1 : direction === 'down' ? 1 : 0;
     const to = from + offset;
     if (from < 0 || offset === 0 || to < 0 || to >= order.length) return order.join(',');
@@ -78,7 +88,7 @@
 
   function reorderViewDisplayOrder(value, views, viewId, targetIndex) {
     const order = normalizeViewDisplayOrder(value, views);
-    const from = order.indexOf(normalizeId(viewId));
+    const from = order.findIndex((id) => normalizeId(id) === normalizeId(viewId));
     if (from < 0) return order.join(',');
     const to = Math.max(0, Math.min(order.length - 1, Number(targetIndex) || 0));
     if (from === to) return order.join(',');
@@ -90,11 +100,11 @@
   function visibleViewOrder({ views, orderValue, hiddenValue, availableIds, includeIds } = {}) {
     const ordered = normalizeViewDisplayOrder(orderValue, views);
     const available = new Set((availableIds || ordered).map(normalizeId).filter(Boolean));
-    const hidden = new Set(normalizeHiddenViews(hiddenValue, views).split(',').filter(Boolean));
+    const hidden = new Set(normalizeHiddenViews(hiddenValue, views).split(',').filter(Boolean).map(normalizeId));
     const included = new Set((includeIds || []).map(normalizeId).filter(Boolean));
-    const visible = ordered.filter((id) => available.has(id) && (!hidden.has(id) || included.has(id)));
+    const visible = ordered.filter((id) => available.has(normalizeId(id)) && (!hidden.has(normalizeId(id)) || included.has(normalizeId(id))));
     if (visible.length > 0) return visible;
-    return ordered.filter((id) => available.has(id)).slice(0, 1);
+    return ordered.filter((id) => available.has(normalizeId(id))).slice(0, 1);
   }
 
   // A disabled view (Trends without history, Projects when off) is drawn with the
@@ -102,21 +112,24 @@
   // visible — neither in the settings summary nor in the guard that keeps the
   // last visible view from being hidden.
   function visibleViewCount({ views, hiddenValue, disabledIds } = {}) {
-    const hidden = new Set(normalizeHiddenViews(hiddenValue, views).split(',').filter(Boolean));
-    const disabled = new Set(viewIds(disabledIds));
-    return viewIds(views).filter((id) => !hidden.has(id) && !disabled.has(id)).length;
+    const hidden = new Set(normalizeHiddenViews(hiddenValue, views).split(',').filter(Boolean).map(normalizeId));
+    const disabled = new Set(viewIds(disabledIds).map(normalizeId));
+    return viewIds(views).filter((id) => !hidden.has(normalizeId(id)) && !disabled.has(normalizeId(id))).length;
   }
 
   function preferredViewId({ views, orderValue, hiddenValue, availableIds, currentId, preferFirst = false, fallback = 'tool' } = {}) {
     const order = visibleViewOrder({ views, orderValue, hiddenValue, availableIds });
     const current = normalizeId(currentId);
-    if (!preferFirst && order.includes(current)) return current;
+    if (!preferFirst) {
+      const currentMatch = order.find((id) => normalizeId(id) === current);
+      if (currentMatch) return currentMatch;
+    }
     return order[0] || fallback;
   }
 
   function hasViewDisplayPreferences(orderValue, hiddenValue, views) {
     const rawOrder = new Set(csvItems(orderValue).map(normalizeId).filter(Boolean));
-    const hasKnownOrder = normalizeViewDisplayOrder(orderValue, views).some((id) => rawOrder.has(id));
+    const hasKnownOrder = normalizeViewDisplayOrder(orderValue, views).some((id) => rawOrder.has(normalizeId(id)));
     return hasKnownOrder || normalizeHiddenViews(hiddenValue, views).length > 0;
   }
 

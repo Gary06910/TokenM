@@ -170,6 +170,7 @@ const verticalDragSortApi = window.TokenMonitorVerticalDragSort;
 const rowDragControllerApi = window.TokenMonitorRowDragController;
 const homeOverviewApi = window.TokenMonitorHomeOverview;
 const homeModulePreferencesApi = window.TokenMonitorHomeModulePreferences;
+const cacheHitRateApi = window.TokenMonitorCacheHitRate;
 const fixedPeriodRangesApi = window.TokenMonitorFixedPeriodRanges;
 const hubBuildPresentationApi = window.TokenMonitorHubBuildPresentation;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
@@ -250,18 +251,20 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'status', labelKey: 'views.status' },
   { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
+  { id: 'cacheHit', labelKey: 'views.cacheHit', insertBefore: 'project' },
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'trends', labelKey: 'views.trends' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
-const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
+const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'cacheHit', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
   { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
+  { id: 'cacheHit', labelKey: 'home.cacheHitRate', viewId: 'cacheHit', insertBefore: 'trends' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
@@ -272,6 +275,7 @@ const VIEW_ICON_CLASSES = {
   status: 'view-icon-status',
   device: 'view-icon-device',
   model: 'view-icon-model',
+  cacheHit: 'view-icon-cacheHit',
   project: 'view-icon-project',
   session: 'view-icon-session',
   limits: 'view-icon-limits',
@@ -362,6 +366,7 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  cacheHitPanel: document.getElementById('cacheHitPanel'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -2769,7 +2774,7 @@ function effectiveViewDisplayOrderValue() {
 }
 
 function availableBreakdownIds() {
-  const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
+  const order = ['home', 'tool', 'status', 'trends', 'device', 'model', 'cacheHit', 'project', 'session'];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
   return limitViewAvailable() ? [...available, 'limits'] : available;
@@ -6525,7 +6530,7 @@ let limitsSourceActionError = '';
 function renderLimitsBootstrap() {
   if (state.stats || state.breakdown !== 'limits' || !state.settings) return;
   els.shell.classList.remove('home-mode', 'session-mode');
-  for (const panel of [els.homePanel, els.breakdown, els.serviceStatusPanel, els.trendsPanel]) {
+  for (const panel of [els.homePanel, els.breakdown, els.serviceStatusPanel, els.cacheHitPanel, els.trendsPanel]) {
     panel?.classList.add('hidden');
   }
   els.limitsPanel.classList.remove('hidden');
@@ -7559,6 +7564,7 @@ function hidePeriodContentForMessage(message) {
   els.breakdown.classList.add('hidden');
   els.serviceStatusPanel?.classList.add('hidden');
   els.limitsPanel.classList.add('hidden');
+  els.cacheHitPanel?.classList.add('hidden');
   els.trendsPanel.classList.add('hidden');
   els.sessionDetail.classList.add('hidden');
   els.sessionDetailHead.classList.add('hidden');
@@ -7985,6 +7991,137 @@ function renderHomeModelModule(period) {
     body.append(item);
   }
   return module;
+}
+
+function cacheHitUnavailableText(summary) {
+  return summary?.reason === 'noInput' ? t('cacheHit.noInput') : t('cacheHit.dataInsufficient');
+}
+
+function cacheHitMetricValue(summary, value) {
+  return summary?.available ? formatCompact(value) : '—';
+}
+
+function cacheHitSummaryMeta(summary, home = false) {
+  if (!summary?.available) return cacheHitUnavailableText(summary);
+  const key = home ? 'home.cacheHitSummary' : 'cacheHit.readInput';
+  return t(key, {
+    cacheRead: formatCompact(summary.cacheReadTokens),
+    input: formatCompact(summary.inputSideTokens)
+  });
+}
+
+function appendCacheHitMetric(section, labelKey, value, summary) {
+  const row = document.createElement('div');
+  row.className = 'cache-hit-row';
+  const label = document.createElement('span');
+  label.className = 'cache-hit-row-label';
+  label.textContent = t(labelKey);
+  const metric = document.createElement('span');
+  metric.className = 'cache-hit-row-value';
+  metric.textContent = cacheHitMetricValue(summary, value);
+  row.append(label, metric);
+  section.append(row);
+}
+
+function cacheHitBreakdownName(scope, key) {
+  if (key === usageAttributionRowsApi.UNATTRIBUTED_KEY) return t('dashboard.tooltip.unclassified');
+  return scope === 'client' ? (clientLabels[key] || key) : key;
+}
+
+function renderCacheHitBreakdownSection(period, scope, titleKey) {
+  const section = document.createElement('section');
+  section.className = 'cache-hit-section';
+  const title = document.createElement('div');
+  title.className = 'cache-hit-section-title';
+  title.textContent = t(titleKey);
+  section.append(title);
+  const rows = cacheHitRateApi.breakdownRows(period, scope);
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'cache-hit-unavailable';
+    empty.textContent = t('cacheHit.noInput');
+    section.append(empty);
+    return section;
+  }
+  for (const row of rows) {
+    const item = document.createElement('div');
+    item.className = 'cache-hit-row cache-hit-breakdown-row';
+    const name = document.createElement('span');
+    name.className = 'cache-hit-breakdown-name';
+    name.textContent = cacheHitBreakdownName(scope, row.key);
+    const rate = document.createElement('span');
+    rate.className = 'cache-hit-row-rate cache-hit-breakdown-rate';
+    rate.textContent = cacheHitRateApi.formatPercent(row);
+    const detail = document.createElement('span');
+    detail.className = 'cache-hit-row-detail';
+    detail.textContent = row.available
+      ? t('cacheHit.readInput', { cacheRead: formatCompact(row.hitTokens), input: formatCompact(row.inputSideTokens) })
+      : t('cacheHit.dataInsufficient');
+    item.append(name, rate, detail);
+    section.append(item);
+  }
+  return section;
+}
+
+function renderHomeCacheHitModule(period) {
+  const { module, body } = homeModuleShell('cache-hit', t('home.cacheHitRate'), 'cacheHit');
+  const summary = cacheHitRateApi.summaryFor(period);
+  const rate = document.createElement('div');
+  rate.className = 'home-cache-hit-rate';
+  rate.textContent = cacheHitRateApi.formatPercent(summary);
+  const meta = document.createElement('div');
+  meta.className = 'home-cache-hit-meta';
+  meta.textContent = cacheHitSummaryMeta(summary, true);
+  body.append(rate, meta);
+  return module;
+}
+
+function renderCacheHit() {
+  if (!els.cacheHitPanel) return;
+  const period = state.stats?.periods?.[state.period] || {};
+  const summary = cacheHitRateApi.summaryFor(period);
+  const hero = document.createElement('section');
+  hero.className = 'cache-hit-hero';
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'cache-hit-eyebrow';
+  eyebrow.textContent = t('cacheHit.title');
+  const rate = document.createElement('div');
+  rate.className = 'cache-hit-rate';
+  rate.textContent = cacheHitRateApi.formatPercent(summary);
+  const meta = document.createElement('div');
+  meta.className = 'cache-hit-meta';
+  meta.textContent = cacheHitSummaryMeta(summary);
+  hero.append(eyebrow, rate, meta);
+
+  const hitSection = document.createElement('section');
+  hitSection.className = 'cache-hit-section';
+  const hitTitle = document.createElement('div');
+  hitTitle.className = 'cache-hit-section-title';
+  hitTitle.textContent = t('cacheHit.summaryTitle');
+  hitSection.append(hitTitle);
+  appendCacheHitMetric(hitSection, 'cacheHit.cacheRead', summary.hitTokens, summary);
+  appendCacheHitMetric(hitSection, 'cacheHit.cacheMiss', summary.cacheMissTokens, summary);
+
+  const composition = document.createElement('section');
+  composition.className = 'cache-hit-section';
+  const compositionTitle = document.createElement('div');
+  compositionTitle.className = 'cache-hit-section-title';
+  compositionTitle.textContent = t('cacheHit.inputComposition');
+  composition.append(compositionTitle);
+  appendCacheHitMetric(composition, 'cacheHit.cacheRead', summary.cacheReadTokens, summary);
+  appendCacheHitMetric(composition, 'cacheHit.cacheWrite', summary.cacheWriteTokens, summary);
+  appendCacheHitMetric(composition, 'cacheHit.freshInput', summary.freshInputTokens, summary);
+  appendCacheHitMetric(composition, 'cacheHit.output', summary.outputTokens, summary);
+  appendCacheHitMetric(composition, 'cacheHit.inputSide', summary.inputSideTokens, summary);
+  appendCacheHitMetric(composition, 'cacheHit.total', summary.totalTokens, summary);
+
+  els.cacheHitPanel.replaceChildren(
+    hero,
+    hitSection,
+    composition,
+    renderCacheHitBreakdownSection(period, 'model', 'cacheHit.byModel'),
+    renderCacheHitBreakdownSection(period, 'client', 'cacheHit.byTool')
+  );
 }
 
 function homeToolSourceRows(period) {
@@ -8518,6 +8655,7 @@ function renderHome() {
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
+    if (id === 'cacheHit') return renderHomeCacheHitModule(period);
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
@@ -8623,6 +8761,7 @@ function render() {
   if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
     els.homePanel.classList.remove('hidden');
@@ -8631,6 +8770,7 @@ function render() {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
     els.limitsPanel.classList.remove('hidden');
     maybeFetchCodexResetForecast();
@@ -8640,13 +8780,23 @@ function render() {
     els.breakdown.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.trendsPanel.classList.remove('hidden');
     renderTrends();
+  } else if (state.breakdown === 'cacheHit') {
+    els.homePanel.classList.add('hidden');
+    els.breakdown.classList.add('hidden');
+    els.limitsPanel.classList.add('hidden');
+    els.serviceStatusPanel?.classList.add('hidden');
+    els.trendsPanel.classList.add('hidden');
+    els.cacheHitPanel?.classList.remove('hidden');
+    renderCacheHit();
   } else if (state.breakdown === 'status') {
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.serviceStatusPanel?.classList.remove('hidden');
     renderServiceStatus();
   } else if (state.openSession) {
@@ -8655,6 +8805,7 @@ function render() {
     els.limitsPanel.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.homePanel.classList.add('hidden');
     els.breakdown.classList.add('hidden');
     if (state.openSession.kind === 'background-review-group') {
@@ -8672,6 +8823,7 @@ function render() {
     els.limitsPanel.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
+    els.cacheHitPanel?.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
     const rows = rowsForPeriod(period);
     let incompleteHint = '';

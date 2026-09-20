@@ -419,8 +419,8 @@ const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
-const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
-const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
+const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'cacheHit', 'project', 'session', 'limits', 'trends'].map((id) => ({ id, ...(id === 'cacheHit' ? { insertBefore: 'project' } : {}) }));
+const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'cacheHit', 'trends'].map((id) => ({ id, ...(id === 'cacheHit' ? { insertBefore: 'trends' } : {}) }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
@@ -603,6 +603,7 @@ function defaultSettings() {
     language: 'auto',
     codexHomeOverride: '',
     tokenMCodexHookEnabled: false,
+    tokenMCodexLastHookEventAt: '',
     tokenMAndroidApiUrl: String(process.env.TOKEN_M_ANDROID_API_URL || '').trim(),
     tokenMAndroidDesktopId: '',
     tokenMAndroidDesktopName: '',
@@ -2010,7 +2011,7 @@ function normalizeServiceStatusRefreshMs(value) {
 }
 
 function migrateViewDisplayOrder(value) {
-  const known = new Set(DEFAULT_VIEW_LIST.map((view) => view.id));
+  const known = new Set(DEFAULT_VIEW_LIST.map((view) => view.id.toLowerCase()));
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
   const hasKnownView = raw.some((item) => known.has(String(item || '').trim().toLowerCase()));
   return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
@@ -2546,6 +2547,8 @@ function readSettings() {
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     merged.tokenMCodexHookEnabled = parseBoolean(merged.tokenMCodexHookEnabled, false);
+    const lastHookEventDate = typeof merged.tokenMCodexLastHookEventAt === 'string' ? new Date(merged.tokenMCodexLastHookEventAt) : null;
+    merged.tokenMCodexLastHookEventAt = lastHookEventDate && !Number.isNaN(lastHookEventDate.getTime()) ? lastHookEventDate.toISOString() : '';
     merged.tokenMAndroidEnabled = parseBoolean(merged.tokenMAndroidEnabled, false);
     merged.tokenMAndroidPrivacyMode = parseBoolean(merged.tokenMAndroidPrivacyMode, true);
     merged.tokenMAndroidApiUrl = typeof merged.tokenMAndroidApiUrl === 'string' ? merged.tokenMAndroidApiUrl.trim() : '';

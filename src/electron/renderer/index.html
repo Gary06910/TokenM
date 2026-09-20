@@ -215,14 +215,14 @@
                 <div id="tokenMOutboxError" class="settings-note" role="status"></div>
                 <div class="settings-actions"><button id="tokenMNotificationUnpairButton" type="button" data-i18n="settings.notifications.android.unpair">解除此电脑绑定</button></div>
               </div>
-              <div class="tokenm-notification-hook">
-                <div><strong data-i18n="settings.notifications.codexHook">Codex 完成通知</strong><p id="tokenMNotificationHookStatus" class="settings-note"></p></div>
-                <div class="settings-actions">
-                  <button id="tokenMNotificationEnableHookButton" type="button" data-i18n="settings.notifications.enableHook">启用</button>
-                  <button id="tokenMNotificationDisableHookButton" type="button" class="hidden" data-i18n="settings.notifications.disableHook">停用</button>
-                </div>
+              <label class="checkbox-label settings-item tokenm-notification-hook">
+                <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notifications.codexHook">Codex 完成通知</span><span id="tokenMNotificationHookStatus" class="settings-item-desc"></span></span>
+                <input id="tokenMNotificationHookEnabled" type="checkbox" />
+              </label>
+              <div id="tokenMNotificationTrustNote" class="settings-note hub-warning hidden">
+                <span data-i18n="settings.notifications.trustNote">首次启用或 Hook 配置变化后，请在 Codex 中输入 /hooks 并信任 To Know Stop Hook。</span>
+                <button id="tokenMNotificationCopyHooksButton" type="button" class="settings-inline-action" data-i18n="settings.notifications.copyHooks">复制 /hooks</button>
               </div>
-              <p id="tokenMNotificationTrustNote" class="settings-note hub-warning hidden" data-i18n="settings.notifications.trustNote">启用后，请在 Codex 中确认并信任 To Know Stop Hook。</p>
               <p id="tokenMNotificationActionStatus" class="settings-note" role="status" aria-live="polite"></p>
             </div>
           </div>
@@ -1830,6 +1830,7 @@
       <div id="session-detail" class="session-detail hidden"></div>
       <section id="serviceStatusPanel" class="service-status-panel hidden"></section>
       <section id="limitsPanel" class="limits-panel hidden"></section>
+      <section id="cacheHitPanel" class="cache-hit-panel hidden"></section>
       <section id="trendsPanel" class="trends-panel hidden"></section>
       <div id="sessionPagerHost" class="session-pager-host hidden"></div>
       <footer class="footer">
@@ -1932,6 +1933,7 @@
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>
+    <script src="cacheHitRate.js"></script>
     <script src="app.js"></script>
     <script src="tokenMNotificationSettings.js"></script>
   </body>

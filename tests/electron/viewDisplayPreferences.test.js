@@ -26,6 +26,17 @@ const views = [
   { id: 'limits', label: 'Limits' }
 ];
 
+const migratedViews = [
+  { id: 'home' },
+  { id: 'tool' },
+  { id: 'device' },
+  { id: 'model' },
+  { id: 'cacheHit', insertBefore: 'session' },
+  { id: 'session' },
+  { id: 'limits' },
+  { id: 'trends' }
+];
+
 function extractViewIds(source, constantName) {
   const mappedMatch = source.match(new RegExp(`const ${constantName} = \\[([^\\]]+)\\]\\.map`));
   if (mappedMatch) {
@@ -81,6 +92,13 @@ test('normalizeViewDisplayOrder drops invalid entries and appends missing views'
   assert.deepEqual(
     normalizeViewDisplayOrder('model,unknown,model,tool', views),
     ['model', 'tool', 'device', 'session', 'limits']
+  );
+});
+
+test('normalizeViewDisplayOrder inserts the new Cache Hit Rate view into legacy orders', () => {
+  assert.deepEqual(
+    normalizeViewDisplayOrder('home,tool,device,model,session,limits,trends', migratedViews),
+    ['home', 'tool', 'device', 'model', 'cacheHit', 'session', 'limits', 'trends']
   );
 });
 
