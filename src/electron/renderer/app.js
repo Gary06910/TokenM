@@ -5254,14 +5254,14 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
     // A single Codex account stays clean like every other provider (just the
     // "Updated" line). The email only matters when several accounts share the
     // group, where it's each subrow's title (options.accountTitle) — not here.
-    if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
+    if (!provider.cached && (provider.status === 'ok' || provider.stale)) metaParts.push(limitProviderMeta(provider, provenance));
     const metaText = metaParts.filter(Boolean).join(' · ');
     if (metaText) meta.append(document.createTextNode(metaText));
     titleBlock.append(meta);
   }
   const plan = document.createElement('div');
   plan.className = 'limit-plan';
-  plan.textContent = options.planText ?? limitProviderPlan(provider);
+  plan.textContent = provider.status === 'loading' ? '' : (options.planText ?? limitProviderPlan(provider));
   head.append(titleBlock, decoratePlanWithSubscription(plan, provider));
   return head;
 }
@@ -5269,6 +5269,13 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
 function renderProviderWindows(provider, color) {
   const windows = document.createElement('div');
   windows.className = 'limit-windows';
+  if (provider.resetExpired || !provider.windows?.length) {
+    const note = document.createElement('div');
+    note.className = 'limits-display-note';
+    note.textContent = t(provider.resetExpired ? 'limits.cache.reset' : provider.status === 'loading' ? 'limits.cache.loading' : 'limits.cache.unavailable');
+    windows.append(note);
+    return windows;
+  }
   if (provider.provider === 'codex') {
     const session = codexCanonicalWindow(provider, 'session');
     const weekly = codexCanonicalWindow(provider, 'weekly');
@@ -6114,7 +6121,16 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
     renderLimitProviderHead(id, label, provider, color, options),
     renderProviderWindows(provider, color)
   );
-  if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
+  if (provider.cached) {
+    const note = document.createElement('div');
+    note.className = 'limits-display-note';
+    note.setAttribute('role', 'status');
+    const time = new Date(provider.cachedAt).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' });
+    note.textContent = t(provider.refreshFailed ? 'limits.cache.failed' : 'limits.cache.saved', { time });
+    if (provider.livePending) note.textContent += ' · ' + t('limits.cache.refreshing');
+    row.append(note);
+  }
+  if (id === 'codex' && !options.accountRow && !provider.cached) appendCodexResetForecast(row);
   return row;
 }
 
@@ -6502,6 +6518,99 @@ function animateLimitResets(snapshot) {
   });
 }
 
+let limitsDisplay = { providers: [], source: null };
+let limitsSourceBusy = false;
+let limitsSourceActionError = '';
+
+function renderLimitsBootstrap() {
+  if (state.stats || state.breakdown !== 'limits' || !state.settings) return;
+  els.shell.classList.remove('home-mode', 'session-mode');
+  for (const panel of [els.homePanel, els.breakdown, els.serviceStatusPanel, els.trendsPanel]) {
+    panel?.classList.add('hidden');
+  }
+  els.limitsPanel.classList.remove('hidden');
+  renderViewSwitcher();
+  renderLimits();
+  signalContentReady();
+}
+
+function displayLimitProviders() {
+  const live = state.stats?.limits?.providers || [];
+  const local = (limitsDisplay.providers || []).map((row) => row.cached && row.windows?.some((w) => w.resetsAt && Date.parse(w.resetsAt) <= Date.now())
+    ? { ...row, resetExpired: true, windows: [] } : row);
+  if (state.mode === 'sync' || state.settings?.hubUrl) {
+    return [...live, ...local.filter((row) => !live.some((value) => value.provider === row.provider && value.accountKey === row.accountKey))];
+  }
+  const localIds = new Set(local.map((row) => row.provider));
+  return [...live.filter((row) => !localIds.has(row.provider)), ...local];
+}
+
+function appendCodexSource(row) {
+  const source = limitsDisplay.source;
+  if (!source) return;
+  const needsPath = ['NOT_FOUND', 'AMBIGUOUS', 'INVALID'].includes(source.status);
+  const region = document.createElement(needsPath ? 'div' : 'details');
+  region.className = 'limits-source';
+  const heading = document.createElement(needsPath ? 'div' : 'summary');
+  heading.textContent = needsPath ? t(`limits.source.${source.status}`)
+    : t(`limits.source.${source.mode === 'manual' ? 'manual' : 'auto'}`);
+  region.append(heading);
+  if (source.authPath) {
+    const location = document.createElement('div');
+    location.className = 'limits-source-path';
+    location.textContent = source.authPath;
+    region.append(location);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  for (const [key, action] of [
+    ['redetect', () => window.tokenMonitor.redetectCodexLimits()],
+    ['choose', () => window.tokenMonitor.pickCodexLimitsHome()],
+    ...(source.mode === 'manual' ? [['restore', () => window.tokenMonitor.restoreCodexLimitsAuto()]] : [])
+  ]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = t(`limits.source.${key}`);
+    button.disabled = limitsSourceBusy;
+    button.addEventListener('click', async () => {
+      limitsSourceBusy = true;
+      limitsSourceActionError = '';
+      state.limitPanelRenderSignature = '';
+      renderLimits();
+      try {
+        const result = await action();
+        if (result.ok) limitsDisplay = result;
+        else if (!result.canceled) limitsSourceActionError = result.error || 'ERROR';
+      } catch (_) { limitsSourceActionError = 'ERROR'; }
+      finally { limitsSourceBusy = false; state.limitPanelRenderSignature = ''; renderLimits(); }
+    });
+    actions.append(button);
+  }
+  region.append(actions);
+  row.append(region);
+  const error = limitsSourceActionError || source.error;
+  if (error) {
+    const note = document.createElement('div');
+    note.className = 'limits-display-note';
+    note.setAttribute('role', 'status');
+    note.textContent = t(`limits.source.${error}`);
+    row.append(note);
+  }
+}
+
+window.tokenMonitor?.onLimitsDisplay?.((value) => {
+  limitsDisplay = value || { providers: [] };
+  state.limitPanelRenderSignature = '';
+  renderLimits();
+  renderLimitsBootstrap();
+});
+void window.tokenMonitor?.getLimitsDisplay?.().then((value) => {
+  limitsDisplay = value || { providers: [] };
+  state.limitPanelRenderSignature = '';
+  renderLimits();
+  renderLimitsBootstrap();
+}).catch(() => {});
+
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
@@ -6515,13 +6624,13 @@ function renderLimits() {
   state.codexSwitchPopoverRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
-  const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
+  const providers = providersByLimitProviderId(displayLimitProviders());
   const orderedProviders = limitProviderOrderApi
     .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
     .filter(({ id }) => limitsEnabled && enabled.has(id));
   const visibleProviderEntries = new Map(orderedProviders.map(({ id }) => {
     const providerEntries = limitsEnabled && enabled.has(id)
-      ? (providers.get(id) || [{ provider: id, status: state.stats ? missingLimitProviderStatus() : 'unavailable', windows: [] }])
+      ? (providers.get(id) || [{ provider: id, status: 'loading', windows: [] }])
       : [{ provider: id, status: 'disabled', windows: [] }];
     return [id, providerEntries];
   }));
@@ -6578,7 +6687,9 @@ function renderLimits() {
       continue;
     }
     if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
+      const group = renderCodexAccountGroup(label, visibleProviders, color);
+      appendCodexSource(group);
+      nodes.push(group);
       continue;
     }
     if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
@@ -6619,7 +6730,9 @@ function renderLimits() {
             markId: thirdPartyVisual.markId
           }
         : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
+    const row = renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions);
+    if (id === 'codex') appendCodexSource(row);
+    nodes.push(row);
   }
   els.limitsPanel.replaceChildren(...nodes);
   animateLimitResets(resetMotionSnapshot);
@@ -7039,7 +7152,7 @@ function turnNode(turn) {
 let contentReadySignaled = false;
 
 function signalContentReady() {
-  if (contentReadySignaled || !state.settings || !state.stats) return;
+  if (contentReadySignaled || !state.settings || (!state.stats && state.breakdown !== 'limits')) return;
   contentReadySignaled = true;
   window.tokenMonitor.signalContentReady?.();
 }
@@ -8427,7 +8540,7 @@ function render() {
     if (!surface) statsRenderScheduler.request();
     return;
   }
-  if (!state.stats) return;
+  if (!state.stats) { renderLimitsBootstrap(); return; }
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -12839,6 +12952,7 @@ async function init() {
   }
   syncSettingsForm();
   diagnosticsPanel?.render();
+  renderLimitsBootstrap();
   publishViewState();
   await refreshHubInfo();
   void refreshHubBuildStatus();

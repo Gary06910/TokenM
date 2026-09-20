@@ -7231,3 +7231,8 @@ html.is-windows .limit-live-badge {
 [hidden] {
   display: none !important;
 }
+
+.limits-source, .limits-display-note { margin-block-start: 8px; font-size: 12px; line-height: 1.5; }
+.limits-source summary { cursor: pointer; }
+.limits-source-path { overflow-wrap: anywhere; margin-block: 6px; user-select: text; }
+.limits-source .settings-actions { flex-wrap: wrap; }

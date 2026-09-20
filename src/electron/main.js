@@ -32,6 +32,8 @@ const {
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limitsFetch');
+const { createCodexLimitsSourceActions } = require('./codexLimitsSourceActions');
+const { createLimitsPresentation } = require('./limitsPresentation');
 const { createTokenMNotificationRuntime } = require('./tokenMNotificationRuntime');
 const {
   expandedBoundsForCollapse,
@@ -599,6 +601,7 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
+    codexHomeOverride: '',
     tokenMCodexHookEnabled: false,
     tokenMAndroidApiUrl: String(process.env.TOKEN_M_ANDROID_API_URL || '').trim(),
     tokenMAndroidDesktopId: '',
@@ -801,6 +804,19 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   return true;
 }
 
+let limitsPresentation = null;
+function ensureLimitsPresentation() {
+  if (!limitsPresentation) limitsPresentation = createLimitsPresentation({
+    filePath: path.join(app.getPath('userData'), 'limits-display-cache.json'),
+    getSettings: () => settings,
+    getConfig: electronLimitsConfig,
+    emit: (value) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('limits:display', value);
+    }
+  });
+  return limitsPresentation;
+}
+
 function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
@@ -813,6 +829,7 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    probeProvider: (...args) => ensureLimitsPresentation().probeProvider(...args),
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
@@ -3176,6 +3193,7 @@ function rememberPendingLimitInvalidation(scope, reason, options = {}) {
 }
 
 function queueLimitInvalidation(scope, reason = 'credential-change', options = {}) {
+  if (scope?.provider) limitsPresentation?.clear(scope.provider);
   const clear = options.clear === true;
   const refresh = options.refresh !== false;
   if (!deviceRuntimeHandle) {
@@ -6685,6 +6703,25 @@ app.whenReady().then(() => {
   const notifications = ensureTokenMNotificationRuntime();
   void notifications.start().catch((error) => {
     console.warn('[notifications] startup failed', { code: error?.code || 'startup_failed' });
+  });
+  ipcMain.handle('limits:getDisplay', () => ensureLimitsPresentation().snapshot());
+  const changeCodexSource = createCodexLimitsSourceActions({
+    getSettings: () => settings,
+    save: () => saveSettings({ throwOnError: true }),
+    presentation: ensureLimitsPresentation(),
+    reconfigure: () => deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig()),
+    refresh: () => queueLimitInvalidation({ provider: 'codex' }, 'credential-change', { clear: true })
+  });
+  ipcMain.handle('limits:pickCodexHome', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return changeCodexSource(result.filePaths[0]);
+  });
+  ipcMain.handle('limits:restoreCodexAuto', () => changeCodexSource(''));
+  ipcMain.handle('limits:redetectCodex', async () => {
+    ensureLimitsPresentation().resolve();
+    void queueLimitInvalidation({ provider: 'codex' }, 'credential-change', { clear: true }).catch(() => {});
+    return { ok: true, ...ensureLimitsPresentation().snapshot() };
   });
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('notifications:getStatus', () => notifications.getStatus());

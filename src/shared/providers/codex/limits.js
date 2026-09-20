@@ -1420,7 +1420,11 @@ async function fetchCodexLimits(options = {}, deps = {}) {
       const live = await fetchLiveCodexAccount(deps, nowMs, managedAccounts);
       providers.push(live);
       markSeen(live);
-    } catch (_) {}
+    } catch (error) {
+      // An optional local observer can explain a failed live source while
+      // managed accounts keep their independent results and wire contract.
+      deps.onCodexLiveLimitsError?.(error);
+    }
   }
   for (const account of managedAccounts) {
     const provider = await fetchManagedCodexAccountLimits(account, options, deps);

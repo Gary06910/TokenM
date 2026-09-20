@@ -708,7 +708,7 @@ test('Codex limits render as one provider group with account subrows', () => {
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   const renderGroup = functionBody(app, 'renderCodexAccountGroup', 'renderClaudeAccountGroup');
 
-  assert.match(renderLimits, /providersByLimitProviderId\(state\.stats\?\.limits\?\.providers \|\| \[\]\)/);
+  assert.match(renderLimits, /providersByLimitProviderId\(displayLimitProviders\(\)\)/);
   assert.match(renderLimits, /renderCodexAccountGroup\(/);
   assert.match(renderGroup, /planText: t\('settings\.codex\.nAccounts', \{ count: providers\.length \}\)/);
   assert.doesNotMatch(renderLimits, /new Map\(\(state\.stats\?\.limits\?\.providers \|\| \[\]\)\.map\(\(provider\) => \[provider\.provider, provider\]\)\)/);

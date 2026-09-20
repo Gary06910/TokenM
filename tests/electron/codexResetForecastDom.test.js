@@ -29,7 +29,7 @@ test('Codex reset forecast stays local to the renderer and uses a narrow IPC bri
 });
 
 test('single and multi-account Codex rows render one forecast entry', () => {
-  assert.match(app, /if \(id === 'codex' && !options\.accountRow\) appendCodexResetForecast\(row\);/);
+  assert.match(app, /if \(id === 'codex' && !options\.accountRow && !provider\.cached\) appendCodexResetForecast\(row\);/);
   const group = app.slice(app.indexOf('function renderCodexAccountGroup'), app.indexOf('function renderClaudeAccountGroup'));
   assert.equal((group.match(/appendCodexResetForecast\(row\)/g) || []).length, 1);
   assert.ok(group.indexOf('row.append(head, accountList)') < group.indexOf('appendCodexResetForecast(row)'), 'multi-account forecast follows the accounts');

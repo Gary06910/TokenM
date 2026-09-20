@@ -20,6 +20,15 @@ contextBridge.exposeInMainWorld('tokenMNotifications', {
 });
 
 contextBridge.exposeInMainWorld('tokenMonitor', {
+  getLimitsDisplay: () => ipcRenderer.invoke('limits:getDisplay'),
+  pickCodexLimitsHome: () => ipcRenderer.invoke('limits:pickCodexHome'),
+  restoreCodexLimitsAuto: () => ipcRenderer.invoke('limits:restoreCodexAuto'),
+  redetectCodexLimits: () => ipcRenderer.invoke('limits:redetectCodex'),
+  onLimitsDisplay: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('limits:display', listener);
+    return () => ipcRenderer.removeListener('limits:display', listener);
+  },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   // Subscriptions are shared across devices when a hub is configured, so they
