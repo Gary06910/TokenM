@@ -204,7 +204,20 @@ test('Linux copy leaves external symlinks for strict package verification to rej
   assert.equal(fs.lstatSync(copiedLink).isSymbolicLink(), true);
   assert.throws(
     () => packageVerifier.verifyPackage(packageRoot),
-    /app\/node_modules\/escape: symlink-escapes-package/
+    (error) => {
+      assert.equal(error.code, 'invalid-server-agent-package');
+      assert.equal(Array.isArray(error.errors), true);
+
+      const externalSymlinkError = error.errors.find(
+        (item) =>
+          item.includes('app/node_modules/escape')
+          && item.includes('symlink-escapes-package')
+          && item.includes('invalid symlink')
+      );
+
+      assert.ok(externalSymlinkError);
+      return true;
+    }
   );
 });
 
