@@ -85,17 +85,23 @@ function privatePath(relativePath) {
     || /outbox.*\.json$/i.test(base);
 }
 
-function copyTree(source, destination, options = {}) {
+function packageCopyOptions(source, options = {}) {
   const excludePrefixes = options.excludePrefixes || [];
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.cpSync(source, destination, {
+  return {
     recursive: true,
+    dereference: false,
+    verbatimSymlinks: true,
     filter: (current) => {
       const relative = path.relative(source, current).split(path.sep).join('/');
       const excluded = excludePrefixes.some((prefix) => relative === prefix || relative.startsWith(`${prefix}/`));
       return !excluded && !privatePath(relative);
     }
-  });
+  };
+}
+
+function copyTree(source, destination, options = {}) {
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.cpSync(source, destination, packageCopyOptions(source, options));
 }
 
 function copyFile(source, destination) {
@@ -238,6 +244,8 @@ module.exports = {
   assertProductionNodeModules,
   assertPackagingContracts,
   createServerAgentPackageManifest,
+  copyTree,
+  packageCopyOptions,
   packageLinuxX64,
   parseOutputDir,
   privatePath,

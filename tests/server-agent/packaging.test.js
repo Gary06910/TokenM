@@ -20,6 +20,57 @@ function read(filePath) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
+function createVerifierFixture({ omitNodeModules = false } = {}) {
+  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-package-verifier-'));
+  const manifest = packageScript.createServerAgentPackageManifest(packageScript.rootPackageJson());
+  fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'runtime', 'node', 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'server-agent'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'shared'), { recursive: true });
+  if (!omitNodeModules) fs.mkdirSync(path.join(packageRoot, 'app', 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(packageRoot, 'bin', 'toknow-agent'), read(launcherPath), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'install.sh'), read(installPath), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'VERSION'), '1.0.0\n', 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'runtime', 'manifest.json'), `${read(runtimePath).trim()}\n`, 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'runtime', 'node', 'bin', 'node'), 'bundled node placeholder\n', 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'app', 'package.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'app', 'LICENSE'), read(path.join(root, 'LICENSE')), 'utf8');
+  return { packageRoot, manifest };
+}
+
+function writeFixtureFile(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, 'fixture\n', 'utf8');
+}
+
+function createRelativeSymlinkFixture() {
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-symlink-source-'));
+  const destination = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-symlink-destination-'));
+  const links = new Map([
+    ['node_modules/.bin/js-yaml', '../js-yaml/bin/js-yaml.js'],
+    ['node_modules/.bin/semver', '../semver/bin/semver.js'],
+    ['node_modules/.bin/tokscale', '../tokscale/bin.js'],
+    ['node/bin/npm', '../lib/node_modules/npm/bin/npm-cli.js'],
+    ['node/bin/npx', '../lib/node_modules/npm/bin/npx-cli.js'],
+    ['node/bin/corepack', '../lib/node_modules/corepack/dist/corepack.js']
+  ]);
+  for (const [relativeLink, target] of links) {
+    const linkPath = path.join(source, ...relativeLink.split('/'));
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    writeFixtureFile(path.resolve(path.dirname(linkPath), target));
+    fs.symlinkSync(target, linkPath);
+  }
+  return { source, destination, links };
+}
+
+function assertInternalSymlink(root, linkPath) {
+  assert.equal(fs.lstatSync(linkPath).isSymbolicLink(), true, `${linkPath} must remain a symlink`);
+  const target = fs.realpathSync(linkPath);
+  const relative = path.relative(root, target);
+  assert.equal(relative.startsWith('..') || path.isAbsolute(relative), false, `${linkPath} escapes ${root}`);
+  return target;
+}
+
 test('Linux x64 runtime metadata is fixed and contains no Tokscale duplicate manifest', () => {
   const metadata = JSON.parse(read(runtimePath));
   assert.deepEqual(metadata, {
@@ -77,6 +128,14 @@ test('server package manifest uses root version and has no desktop entry point',
   assert.equal(manifest.dependencies.tokscale, '^4.17.0');
 });
 
+test('package copy policy preserves symlink text and never dereferences', () => {
+  const options = packageScript.packageCopyOptions(path.join(os.tmpdir(), 'toknow-agent-copy-source'));
+  assert.equal(options.recursive, true);
+  assert.equal(options.verbatimSymlinks, true);
+  assert.equal(options.dereference, false);
+  assert.equal(typeof options.filter, 'function');
+});
+
 test('Node checksum parser accepts the official SHASUMS256 format', () => {
   const digest = 'a'.repeat(64);
   assert.equal(runtime.parseShasums256(`${digest}  node-v22.23.2-linux-x64.tar.xz\n`, 'node-v22.23.2-linux-x64.tar.xz'), digest);
@@ -99,25 +158,54 @@ test('version flag is local metadata only and does not enter the collector path'
 });
 
 test('package verifier accepts the intended layout and rejects Electron source', () => {
-  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-package-verifier-'));
-  const manifest = packageScript.createServerAgentPackageManifest(packageScript.rootPackageJson());
-  fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(packageRoot, 'runtime', 'node', 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'server-agent'), { recursive: true });
-  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'shared'), { recursive: true });
-  fs.mkdirSync(path.join(packageRoot, 'app', 'node_modules'), { recursive: true });
-  fs.writeFileSync(path.join(packageRoot, 'bin', 'toknow-agent'), read(launcherPath), 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'install.sh'), read(installPath), 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'VERSION'), '1.0.0\n', 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'runtime', 'manifest.json'), `${read(runtimePath).trim()}\n`, 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'runtime', 'node', 'bin', 'node'), 'bundled node placeholder\n', 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'app', 'package.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
-  fs.writeFileSync(path.join(packageRoot, 'app', 'LICENSE'), read(path.join(root, 'LICENSE')), 'utf8');
+  const { packageRoot } = createVerifierFixture();
   assert.equal(packageVerifier.verifyPackage(packageRoot, { requireExecutable: false }).version, '1.0.0');
 
   fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'electron'), { recursive: true });
   fs.writeFileSync(path.join(packageRoot, 'app', 'src', 'electron', 'main.js'), 'forbidden\n', 'utf8');
   assert.throws(() => packageVerifier.verifyPackage(packageRoot), /Electron source/);
+});
+
+test('Linux copy preserves npm .bin relative symlinks inside the package', { skip: process.platform !== 'linux' }, () => {
+  const { source, destination, links } = createRelativeSymlinkFixture();
+  packageScript.copyTree(source, path.join(destination, 'package'));
+  const packageRoot = path.join(destination, 'package');
+  for (const [relativeLink, target] of [...links].slice(0, 3)) {
+    const copiedLink = path.join(packageRoot, ...relativeLink.split('/'));
+    assert.equal(fs.readlinkSync(copiedLink), target);
+    assertInternalSymlink(packageRoot, copiedLink);
+    assert.notEqual(fs.realpathSync(copiedLink), fs.realpathSync(path.join(source, ...relativeLink.split('/'))));
+  }
+});
+
+test('Linux copy preserves Node runtime bin relative symlinks inside the runtime root', { skip: process.platform !== 'linux' }, () => {
+  const { source, destination, links } = createRelativeSymlinkFixture();
+  packageScript.copyTree(source, path.join(destination, 'package'));
+  const runtimeRoot = path.join(destination, 'package', 'node');
+  for (const [relativeLink, target] of [...links].slice(3)) {
+    const copiedLink = path.join(destination, 'package', ...relativeLink.split('/'));
+    assert.equal(fs.readlinkSync(copiedLink), target);
+    assertInternalSymlink(runtimeRoot, copiedLink);
+  }
+});
+
+test('Linux copy leaves external symlinks for strict package verification to reject', { skip: process.platform !== 'linux' }, () => {
+  const { packageRoot } = createVerifierFixture({ omitNodeModules: true });
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-external-symlink-source-'));
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-external-symlink-target-'));
+  const outsideFile = path.join(outsideRoot, 'outside.txt');
+  const sourceLink = path.join(source, 'escape');
+  writeFixtureFile(outsideFile);
+  fs.symlinkSync(outsideFile, sourceLink);
+
+  const destination = path.join(packageRoot, 'app', 'node_modules');
+  packageScript.copyTree(source, destination);
+  const copiedLink = path.join(destination, 'escape');
+  assert.equal(fs.lstatSync(copiedLink).isSymbolicLink(), true);
+  assert.throws(
+    () => packageVerifier.verifyPackage(packageRoot),
+    /app\/node_modules\/escape: symlink-escapes-package/
+  );
 });
 
 test('Windows package command is fail-closed instead of producing a fake Linux artifact', { skip: process.platform !== 'win32' }, () => {
