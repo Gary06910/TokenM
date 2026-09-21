@@ -1,0 +1,7 @@
+{
+  "nodeVersion": "22.23.2",
+  "platform": "linux",
+  "arch": "x64",
+  "nodeAsset": "node-v22.23.2-linux-x64.tar.xz",
+  "distributionBaseUrl": "https://nodejs.org/dist/v22.23.2/"
+}

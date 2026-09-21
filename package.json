@@ -11,6 +11,7 @@
     "agent:once": "npm run ensure:tokscale && node src/agent/agent.js --once",
     "server-agent": "node src/server-agent/cli.js run",
     "server-agent:once": "node src/server-agent/cli.js once",
+    "package:server-agent:linux-x64": "node scripts/server-agent/package-linux-x64.js",
     "widget": "npm run ensure:tokscale && electron .",
     "dev": "npm run ensure:tokscale && electron .",
     "ensure:tokscale": "node scripts/ensure-vendored-tokscale.js",

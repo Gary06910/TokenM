@@ -1,0 +1,132 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const test = require('node:test');
+
+const root = path.resolve(__dirname, '..', '..');
+const runtimePath = path.join(root, 'scripts', 'server-agent', 'runtime.json');
+const launcherPath = path.join(root, 'bin', 'toknow-agent');
+const installPath = path.join(root, 'install.sh');
+const packageScriptPath = path.join(root, 'scripts', 'server-agent', 'package-linux-x64.js');
+const runtime = require('../../scripts/server-agent/fetch-node-runtime');
+const packageScript = require('../../scripts/server-agent/package-linux-x64');
+const packageVerifier = require('../../scripts/server-agent/verify-package');
+
+function read(filePath) {
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+test('Linux x64 runtime metadata is fixed and contains no Tokscale duplicate manifest', () => {
+  const metadata = JSON.parse(read(runtimePath));
+  assert.deepEqual(metadata, {
+    nodeVersion: '22.23.2',
+    platform: 'linux',
+    arch: 'x64',
+    nodeAsset: 'node-v22.23.2-linux-x64.tar.xz',
+    distributionBaseUrl: 'https://nodejs.org/dist/v22.23.2/'
+  });
+  assert.deepEqual(runtime.distributionUrls(metadata), {
+    archive: 'https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz',
+    shasums: 'https://nodejs.org/dist/v22.23.2/SHASUMS256.txt'
+  });
+  assert.equal(Object.keys(metadata).some((key) => key.toLowerCase().includes('tokscale')), false);
+});
+
+test('Tokscale package metadata remains sourced from the pinned vendor manifest', () => {
+  const rootPackage = packageScript.rootPackageJson();
+  const vendorManifest = JSON.parse(read(path.join(root, 'scripts', 'vendor', 'tokscale.json')));
+  packageScript.assertPackagingContracts(rootPackage, JSON.parse(read(runtimePath)), vendorManifest);
+  assert.equal(vendorManifest.baseVersion, '4.17.0');
+  assert.equal(vendorManifest.platforms['linux-x64'].package, '@tokscale/cli-linux-x64-gnu');
+  assert.equal(vendorManifest.platforms['linux-x64'].asset, 'tokscale-linux-x64');
+  assert.equal(packageScript.createServerAgentPackageManifest(rootPackage).dependencies['electron-updater'], undefined);
+});
+
+test('launcher is self-relative and uses only the bundled Node executable', () => {
+  const launcher = read(launcherPath);
+  assert.match(launcher, /exec "\$PACKAGE_ROOT\/runtime\/node\/bin\/node" "\$PACKAGE_ROOT\/app\/src\/server-agent\/cli\.js" "\$@"/);
+  assert.match(launcher, /\$0/);
+  assert.doesNotMatch(launcher, /\b(?:npm|npx)\b/i);
+  assert.doesNotMatch(launcher, /\/usr\/(?:local\/)?bin\/node\b|\bnodejs\b/i);
+  assert.doesNotMatch(launcher, /ELECTRON_RUN_AS_NODE|electron(?:\.exe)?\b|DISPLAY|X11|Wayland/i);
+  assert.doesNotMatch(launcher, /D:\\Program Files|toknow-server-agent-2a2|\/home\/user\/Public/i);
+});
+
+test('install script supports a user prefix override and never touches user state', () => {
+  const install = read(installPath);
+  assert.match(install, /TO_KNOW_INSTALL_ROOT/);
+  assert.match(install, /--prefix/);
+  assert.match(install, /\$HOME\/\.local\/share\/toknow-agent/);
+  assert.match(install, /\$HOME\/\.local\/bin\/toknow-agent/);
+  assert.doesNotMatch(install, /\bsudo\b|\/usr\/local|systemd/i);
+  assert.doesNotMatch(install, /\.config\/toknow-agent|credentials\.json|settings\.json|auth\.json|outbox/i);
+});
+
+test('server package manifest uses root version and has no desktop entry point', () => {
+  const rootPackage = packageScript.rootPackageJson();
+  const manifest = packageScript.createServerAgentPackageManifest(rootPackage);
+  assert.equal(manifest.version, rootPackage.version);
+  assert.equal(Object.hasOwn(manifest, 'main'), false);
+  assert.equal(Object.hasOwn(manifest, 'devDependencies'), false);
+  assert.equal(Object.hasOwn(manifest.dependencies, 'electron-updater'), false);
+  assert.equal(Object.hasOwn(manifest.dependencies, '@xhayper/discord-rpc'), false);
+  assert.equal(manifest.dependencies.tokscale, '^4.17.0');
+});
+
+test('Node checksum parser accepts the official SHASUMS256 format', () => {
+  const digest = 'a'.repeat(64);
+  assert.equal(runtime.parseShasums256(`${digest}  node-v22.23.2-linux-x64.tar.xz\n`, 'node-v22.23.2-linux-x64.tar.xz'), digest);
+  assert.equal(runtime.parseShasums256(`${digest} *node-v22.23.2-linux-x64.tar.xz\n`, 'node-v22.23.2-linux-x64.tar.xz'), digest);
+  assert.throws(
+    () => runtime.parseShasums256(`${digest}  other.tar.xz\n`, 'node-v22.23.2-linux-x64.tar.xz'),
+    /does not contain/
+  );
+});
+
+test('version flag is local metadata only and does not enter the collector path', () => {
+  const result = spawnSync(process.execPath, [path.join(root, 'src', 'server-agent', 'cli.js'), '--version'], {
+    cwd: path.join(root, 'src', 'server-agent'),
+    encoding: 'utf8',
+    env: { ...process.env, CODEX_HOME: path.join(os.tmpdir(), 'missing-toknow-version-codex-home') }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'To Know Server Agent 1.0.0');
+  assert.equal(result.stderr, '');
+});
+
+test('package verifier accepts the intended layout and rejects Electron source', () => {
+  const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-package-verifier-'));
+  const manifest = packageScript.createServerAgentPackageManifest(packageScript.rootPackageJson());
+  fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'runtime', 'node', 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'server-agent'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'shared'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'app', 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(packageRoot, 'bin', 'toknow-agent'), read(launcherPath), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'install.sh'), read(installPath), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'VERSION'), '1.0.0\n', 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'runtime', 'manifest.json'), `${read(runtimePath).trim()}\n`, 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'runtime', 'node', 'bin', 'node'), 'bundled node placeholder\n', 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'app', 'package.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'app', 'LICENSE'), read(path.join(root, 'LICENSE')), 'utf8');
+  assert.equal(packageVerifier.verifyPackage(packageRoot, { requireExecutable: false }).version, '1.0.0');
+
+  fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'electron'), { recursive: true });
+  fs.writeFileSync(path.join(packageRoot, 'app', 'src', 'electron', 'main.js'), 'forbidden\n', 'utf8');
+  assert.throws(() => packageVerifier.verifyPackage(packageRoot), /Electron source/);
+});
+
+test('Windows package command is fail-closed instead of producing a fake Linux artifact', { skip: process.platform !== 'win32' }, () => {
+  const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toknow-agent-no-fake-package-'));
+  const result = spawnSync(process.execPath, [packageScriptPath, '--output-dir', outputRoot], {
+    cwd: root,
+    encoding: 'utf8'
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must run on linux x64/i);
+  assert.deepEqual(fs.readdirSync(outputRoot), []);
+});

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_PATH=$0
+case "$SCRIPT_PATH" in
+  /*) ;;
+  *) SCRIPT_PATH="$(pwd -P)/$SCRIPT_PATH" ;;
+esac
+
+while [ -L "$SCRIPT_PATH" ]; do
+  LINK_TARGET=$(readlink "$SCRIPT_PATH")
+  case "$LINK_TARGET" in
+    /*) SCRIPT_PATH=$LINK_TARGET ;;
+    *) SCRIPT_PATH="$(dirname -- "$SCRIPT_PATH")/$LINK_TARGET" ;;
+  esac
+done
+
+PACKAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)
+exec "$PACKAGE_ROOT/runtime/node/bin/node" "$PACKAGE_ROOT/app/src/server-agent/cli.js" "$@"

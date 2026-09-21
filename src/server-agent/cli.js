@@ -1,11 +1,32 @@
 'use strict';
 
-const { parseArgs } = require('../shared/config');
-const { loadServerAgentConfig } = require('./config');
-const { createServerAgentPaths } = require('./paths');
-const { createServerAgentSupervisor } = require('./supervisor');
+const fs = require('node:fs');
+const path = require('node:path');
+
+function packageJsonPath() {
+  return path.join(__dirname, '..', '..', 'package.json');
+}
+
+function readServerAgentVersion() {
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath(), 'utf8'));
+  return String(packageJson.version || '0.0.0');
+}
+
+function isVersionRequest(argv) {
+  return argv.includes('--version') || argv.includes('-v');
+}
 
 async function run(argv = process.argv.slice(2)) {
+  if (isVersionRequest(argv)) {
+    const version = readServerAgentVersion();
+    process.stdout.write(`To Know Server Agent ${version}\n`);
+    return version;
+  }
+
+  const { parseArgs } = require('../shared/config');
+  const { loadServerAgentConfig } = require('./config');
+  const { createServerAgentPaths } = require('./paths');
+  const { createServerAgentSupervisor } = require('./supervisor');
   const command = argv.find((value) => !String(value).startsWith('--')) || 'run';
   if (!['run', 'once'].includes(command)) throw new Error(`unknown server-agent command: ${command}`);
   const args = parseArgs(argv.filter((value) => value !== command));
@@ -45,4 +66,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run };
+module.exports = { isVersionRequest, packageJsonPath, readServerAgentVersion, run };
