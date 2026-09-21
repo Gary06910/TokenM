@@ -85,11 +85,16 @@ function privatePath(relativePath) {
     || /outbox.*\.json$/i.test(base);
 }
 
-function copyTree(source, destination) {
+function copyTree(source, destination, options = {}) {
+  const excludePrefixes = options.excludePrefixes || [];
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(source, destination, {
     recursive: true,
-    filter: (current) => !privatePath(path.relative(source, current))
+    filter: (current) => {
+      const relative = path.relative(source, current).split(path.sep).join('/');
+      const excluded = excludePrefixes.some((prefix) => relative === prefix || relative.startsWith(`${prefix}/`));
+      return !excluded && !privatePath(relative);
+    }
   });
 }
 
@@ -186,7 +191,9 @@ async function packageLinuxX64({
 
   copyTree(path.join(root, 'src', 'server-agent'), path.join(appRoot, 'src', 'server-agent'));
   copyTree(path.join(root, 'src', 'shared'), path.join(appRoot, 'src', 'shared'));
-  copyTree(path.join(root, 'node_modules'), path.join(appRoot, 'node_modules'));
+  copyTree(path.join(root, 'node_modules'), path.join(appRoot, 'node_modules'), {
+    excludePrefixes: [...EXCLUDED_PRODUCTION_DEPENDENCIES]
+  });
   copyFile(path.join(root, 'LICENSE'), path.join(appRoot, 'LICENSE'));
   fs.writeFileSync(
     path.join(appRoot, 'package.json'),

@@ -175,7 +175,11 @@ function verifyPackage(packageRoot, options = {}) {
     const mode = fs.statSync(bundledNode).mode;
     if ((mode & 0o111) === 0) errors.push('bundled Node is not executable');
   }
-  if (pathExists(root, 'app/node_modules/electron') || pathExists(root, 'app/node_modules/electron-builder')) {
+  if (
+    pathExists(root, 'app/node_modules/electron')
+    || pathExists(root, 'app/node_modules/electron-builder')
+    || pathExists(root, 'app/node_modules/electron-updater')
+  ) {
     errors.push('desktop Electron runtime/build dependency is present');
   }
 
