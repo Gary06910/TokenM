@@ -11,6 +11,7 @@ const {
   validateWorkerMessage
 } = require('./protocol');
 const { validateServerSnapshot } = require('./snapshot');
+const { createServerNotificationRuntime } = require('./notificationRuntime');
 
 const DEFAULT_START_TIMEOUT_MS = 10_000;
 const DEFAULT_STOP_TIMEOUT_MS = 2_000;
@@ -33,6 +34,11 @@ function safeEnvValue(value, fallback = '') {
   return boundedString(String(value ?? ''), fallback, 512);
 }
 
+function safeNotificationCode(error, fallback = 'notification_start_failed') {
+  const code = String(error?.code || fallback);
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : fallback;
+}
+
 function createServerAgentSupervisor(options = {}, deps = {}) {
   const config = options.config
     ? parseServerAgentConfig(options.config, options.configValidation || {})
@@ -45,10 +51,13 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
   const stopTimeoutMs = options.stopTimeoutMs || DEFAULT_STOP_TIMEOUT_MS;
   const workers = new Map();
   const latestSnapshots = new Map();
+  const makeNotificationRuntime = deps.createNotificationRuntime || createServerNotificationRuntime;
   let lifecycle = 'created';
   let startPromise = null;
   let stopPromise = null;
   let pidFileWritten = false;
+  let notificationRuntime = null;
+  let notificationStatus = { state: options.once === true ? 'skipped_once' : 'not_started' };
 
   function enabledProfiles() {
     return config.profiles.filter((profile) => profile.enabled);
@@ -202,6 +211,38 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     pidFileWritten = false;
   }
 
+  async function startNotificationRuntime() {
+    if (options.once === true) return;
+    try {
+      notificationRuntime = makeNotificationRuntime({
+        config,
+        paths,
+        fetch: options.fetch,
+        logger: { warn: (message, details) => options.onDiagnostic?.({ stage: 'notification', code: safeNotificationCode(details) }) }
+      }, deps.notificationDeps || {});
+      notificationStatus = await notificationRuntime.start();
+    } catch (error) {
+      notificationRuntime = null;
+      notificationStatus = { state: 'degraded', configured: false, error: safeNotificationCode(error) };
+      options.onDiagnostic?.({ stage: 'notification', code: notificationStatus.error });
+    }
+  }
+
+  async function stopNotificationRuntime() {
+    if (!notificationRuntime) return;
+    try {
+      notificationStatus = await notificationRuntime.stop();
+    } catch (error) {
+      notificationStatus = {
+        ...(notificationStatus || {}),
+        state: 'degraded',
+        error: safeNotificationCode(error, 'notification_stop_failed')
+      };
+      options.onDiagnostic?.({ stage: 'notification', code: notificationStatus.error });
+    }
+    notificationRuntime = null;
+  }
+
   function waitForStart() {
     const records = [...workers.values()];
     if (records.length === 0) return Promise.resolve();
@@ -229,6 +270,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     lifecycle = 'starting';
     startPromise = (async () => {
       writeSupervisorPid();
+      await startNotificationRuntime();
       for (const profile of enabledProfiles()) spawnWorker(profile);
       await waitForStart();
       if (lifecycle !== 'stopping') lifecycle = 'running';
@@ -279,6 +321,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     if (stopPromise) return stopPromise;
     stopPromise = (async () => {
       lifecycle = 'stopping';
+      await stopNotificationRuntime();
       const records = [...workers.values()];
       for (const record of records) {
         if (!record.child || record.exited) continue;
@@ -322,6 +365,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
       workerModel: 'child_process',
       clientList: 'codex',
       profileCount: enabledProfiles().length,
+      notification: clone(notificationStatus),
       profiles
     };
   }
@@ -335,6 +379,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     getSnapshot,
     getAllSnapshots,
     getDiagnostics,
+    getNotificationStatus: () => clone(notificationStatus),
     _buildWorkerEnv: buildWorkerEnv
   };
 }

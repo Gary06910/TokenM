@@ -2,6 +2,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { parseArgs } = require('../shared/config');
+const { reportFailure, run: runHookForwarder } = require('../shared/notification/codexHookForwarder');
+const { disableCodexStopHook, enableCodexStopHook, readCodexHookState } = require('../shared/notification/codexStopHook');
+const { loadServerAgentConfig, normalizeProfileId } = require('./config');
+const { loadServerCredential } = require('./notificationRuntime');
+const { serverHookCommand, stableLauncherPath } = require('./hooks');
+const { createServerAgentPaths } = require('./paths');
 
 function packageJsonPath() {
   return path.join(__dirname, '..', '..', 'package.json');
@@ -16,6 +23,127 @@ function isVersionRequest(argv) {
   return argv.includes('--version') || argv.includes('-v');
 }
 
+function safeCode(error, fallback = 'server_agent_failed') {
+  const code = String(error?.code || fallback);
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : fallback;
+}
+
+function commandError(code, message = code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function optionValue(args, ...names) {
+  for (const name of names) {
+    if (args[name] !== undefined) return args[name];
+  }
+  return undefined;
+}
+
+function pathsForArgs(args) {
+  return createServerAgentPaths({
+    root: optionValue(args, 'root'),
+    configRoot: optionValue(args, 'configRoot', 'config-root'),
+    dataRoot: optionValue(args, 'dataRoot', 'data-root'),
+    stateRoot: optionValue(args, 'stateRoot', 'state-root')
+  });
+}
+
+function configForArgs(args, paths) {
+  const configPath = optionValue(args, 'config') || paths.configFile;
+  return { config: loadServerAgentConfig(configPath), configPath };
+}
+
+function profileForConfig(config, profileId) {
+  let id;
+  try { id = normalizeProfileId(profileId); } catch (_) { throw commandError('invalid_profile'); }
+  const profile = config.profiles.find((candidate) => candidate.id === id);
+  if (!profile) throw commandError('unknown_profile');
+  return profile;
+}
+
+function launcherForArgs(args) {
+  return optionValue(args, 'launcherPath', 'launcher') || stableLauncherPath();
+}
+
+function configFileState(codexHome) {
+  const filePath = path.join(codexHome, 'hooks.json');
+  try {
+    const stat = fs.lstatSync(filePath);
+    return stat.isFile() && !stat.isSymbolicLink() ? 'present' : 'invalid';
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+}
+
+function hookIdentity(profileId, args) {
+  return serverHookCommand({ launcherPath: launcherForArgs(args), profileId });
+}
+
+function hookStatus(config, profile, args) {
+  const command = hookIdentity(profile.id, args);
+  const state = readCodexHookState({ codexHome: profile.codexHome, commandIdentity: command });
+  return {
+    profileId: profile.id,
+    configured: state.enabled,
+    configFileState: configFileState(profile.codexHome),
+    needsTrust: state.needsTrust === true,
+    error: state.error ? 'hook_config_error' : null
+  };
+}
+
+function notificationCredentialState(paths) {
+  try {
+    const credential = loadServerCredential(paths.credentialFile);
+    return credential.state;
+  } catch (error) {
+    return safeCode(error, 'invalid_credential');
+  }
+}
+
+function writeJson(value) {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+  return value;
+}
+
+async function runHooks(subcommand, args) {
+  if (!['status', 'enable', 'disable'].includes(subcommand)) {
+    throw commandError('unknown_hooks_command');
+  }
+  const paths = pathsForArgs(args);
+  const { config } = configForArgs(args, paths);
+  const profile = profileForConfig(config, optionValue(args, 'profile'));
+  if (subcommand === 'status') return writeJson(hookStatus(config, profile, args));
+  if (subcommand === 'enable') {
+    const credentialState = notificationCredentialState(paths);
+    if (credentialState === 'unconfigured') throw commandError('notification_not_configured');
+    if (credentialState !== 'configured') throw commandError('invalid_credential');
+    const command = hookIdentity(profile.id, args);
+    const state = enableCodexStopHook({ codexHome: profile.codexHome, command });
+    if (state.error || !state.enabled) throw commandError('hook_enable_failed');
+    return writeJson({ profileId: profile.id, configured: true, needsTrust: true });
+  }
+  const command = hookIdentity(profile.id, args);
+  const state = disableCodexStopHook({ codexHome: profile.codexHome, commandIdentity: command });
+  if (state.error) throw commandError('hook_disable_failed');
+  return writeJson({ profileId: profile.id, configured: false, needsTrust: false });
+}
+
+async function runHookFailOpen(args) {
+  try {
+    const paths = pathsForArgs(args);
+    const profileId = optionValue(args, 'profile');
+    await runHookForwarder({ runtimePath: paths.notificationRuntimePath, profileId });
+    process.stdout.write('{}\n');
+  } catch (error) {
+    // The Stop Hook is an optional notification side effect. Never let an
+    // unavailable bridge, credential, or cloud endpoint fail the Codex task.
+    reportFailure(error);
+  }
+  return undefined;
+}
+
 async function run(argv = process.argv.slice(2)) {
   if (isVersionRequest(argv)) {
     const version = readServerAgentVersion();
@@ -23,20 +151,15 @@ async function run(argv = process.argv.slice(2)) {
     return version;
   }
 
-  const { parseArgs } = require('../shared/config');
-  const { loadServerAgentConfig } = require('./config');
-  const { createServerAgentPaths } = require('./paths');
+  const args = parseArgs(argv);
+  const positional = argv.filter((value) => !String(value).startsWith('--'));
+  const command = positional[0] || 'run';
+  if (command === 'hook') return runHookFailOpen(args);
+  if (command === 'hooks') return runHooks(positional[1], args);
+  if (!['run', 'once'].includes(command)) throw commandError('unknown_server_agent_command');
+  const paths = pathsForArgs(args);
+  const { config } = configForArgs(args, paths);
   const { createServerAgentSupervisor } = require('./supervisor');
-  const command = argv.find((value) => !String(value).startsWith('--')) || 'run';
-  if (!['run', 'once'].includes(command)) throw new Error(`unknown server-agent command: ${command}`);
-  const args = parseArgs(argv.filter((value) => value !== command));
-  const paths = createServerAgentPaths({
-    configRoot: args.configRoot,
-    dataRoot: args.dataRoot,
-    stateRoot: args.stateRoot
-  });
-  const configPath = args.config || paths.configFile;
-  const config = loadServerAgentConfig(configPath);
   const supervisor = createServerAgentSupervisor({
     config,
     paths,
@@ -61,9 +184,18 @@ async function run(argv = process.argv.slice(2)) {
 
 if (require.main === module) {
   run().catch((error) => {
-    process.stderr.write(`server-agent failed: ${error.code || 'runtime-error'}\n`);
+    process.stderr.write(`server-agent failed: ${safeCode(error)}\n`);
     process.exitCode = 1;
   });
 }
 
-module.exports = { isVersionRequest, packageJsonPath, readServerAgentVersion, run };
+module.exports = {
+  configFileState,
+  hookStatus,
+  isVersionRequest,
+  packageJsonPath,
+  readServerAgentVersion,
+  run,
+  runHookFailOpen,
+  runHooks
+};

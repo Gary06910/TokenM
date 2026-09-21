@@ -5,6 +5,7 @@ const path = require('node:path');
 const { normalizeProfileId } = require('./config');
 
 const APP_DIR_NAME = 'toknow-agent';
+const DESKTOP_ID_RE = /^dev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function nonBlank(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
@@ -39,6 +40,7 @@ function createServerAgentPaths(options = {}) {
   const configFile = path.join(configRoot, 'config.json');
   const credentialFile = path.join(dataRoot, 'credentials.json');
   const profilesRoot = path.join(stateRoot, 'profiles');
+  const notificationRoot = path.join(stateRoot, 'notification');
 
   function profileStateDir(profileId) {
     return path.join(profilesRoot, normalizeProfileId(profileId), 'runtime');
@@ -55,6 +57,11 @@ function createServerAgentPaths(options = {}) {
     };
   }
 
+  function notificationOutboxPath(desktopId) {
+    if (!DESKTOP_ID_RE.test(desktopId || '')) return null;
+    return path.join(notificationRoot, `android-outbox-${desktopId}.json`);
+  }
+
   return Object.freeze({
     configRoot,
     configFile,
@@ -62,6 +69,9 @@ function createServerAgentPaths(options = {}) {
     credentialFile,
     stateRoot,
     profilesRoot,
+    notificationRoot,
+    notificationRuntimePath: path.join(notificationRoot, 'hook-runtime.json'),
+    notificationOutboxPath,
     supervisorPidPath: path.join(stateRoot, 'server-agent.pid'),
     profileStateDir,
     profilePaths
