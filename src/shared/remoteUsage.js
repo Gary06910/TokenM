@@ -41,15 +41,19 @@ async function listAllRemoteUsageSnapshots(client, { excludeSelf = false, deskto
   }
   throw Error('Usage pagination limit exceeded');
 }
-function aggregateRemoteUsage(items, { excludeSelf = false, desktopId } = {}) {
+function dedupeRemoteUsageItems(items, { excludeSelf = false, desktopId } = {}) {
   const selected = new Map();
-  for (const item of items) {
+  for (const item of Array.isArray(items) ? items : []) {
     validateUsagePage({ items: [item], nextCursor: null });
     if (excludeSelf && item.source.desktopId === desktopId) continue;
     const identity = JSON.stringify([item.source.desktopId, item.profile.id]);
     const previous = selected.get(identity);
     if (!previous || Date.parse(item.receivedAt) > Date.parse(previous.receivedAt)) selected.set(identity, item);
   }
+  return [...selected.values()];
+}
+function aggregateRemoteUsage(items, { excludeSelf = false, desktopId } = {}) {
+  const selected = dedupeRemoteUsageItems(items, { excludeSelf, desktopId });
   const result = {};
   for (const periodName of PERIODS) {
     const total = { ...Object.fromEntries([...COUNTERS, 'costUsd'].map((key) => [key, 0])),
@@ -90,4 +94,4 @@ function dedupeAccountLimits(observations) {
   }
   return [...winners.values(), ...unknown];
 }
-module.exports = { MAX_PAGE_GUARD, validateStoredUsage, validateUsagePage, listAllRemoteUsageSnapshots, aggregateRemoteUsage, dedupeAccountLimits };
+module.exports = { MAX_PAGE_GUARD, validateStoredUsage, validateUsagePage, listAllRemoteUsageSnapshots, dedupeRemoteUsageItems, aggregateRemoteUsage, dedupeAccountLimits };

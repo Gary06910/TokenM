@@ -35,6 +35,8 @@ const { createElectronLimitsFetch } = require('./limitsFetch');
 const { createCodexLimitsSourceActions } = require('./codexLimitsSourceActions');
 const { createLimitsPresentation } = require('./limitsPresentation');
 const { createTokenMNotificationRuntime } = require('./tokenMNotificationRuntime');
+const { createRemoteUsageRuntime } = require('./remoteUsageRuntime');
+const { composeUsageSources } = require('../shared/usageComposition');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -435,6 +437,7 @@ let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let tokenMNotificationRuntime = null;
+let remoteUsageRuntime = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 let sessionUsageArchive = null;
@@ -2672,6 +2675,7 @@ async function commitTokenMNotificationSettings(patch) {
   settings = { ...settings, ...(patch || {}) };
   saveSettings({ throwOnError: true });
   pushSettingsToRenderer();
+  ensureRemoteUsageRuntime().configure(remoteUsageConfig());
   return settings;
 }
 
@@ -3016,8 +3020,58 @@ let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
 
+function remoteUsageConfig() {
+  return {
+    baseUrl: settings?.tokenMAndroidApiUrl || '',
+    credential: settings?.tokenMAndroidCredential || ''
+  };
+}
+
+function ensureRemoteUsageRuntime() {
+  if (remoteUsageRuntime) return remoteUsageRuntime;
+  remoteUsageRuntime = createRemoteUsageRuntime({
+    getConfig: remoteUsageConfig,
+    fetch: electronLimitsFetch(),
+    onUpdate: () => {
+      if (!latestStats) return;
+      sendPush({
+        event: 'stats',
+        data: { type: 'stats', mode, reason: 'remote-usage', stats: latestStats }
+      }, { skipExport: true });
+    },
+    logger: {
+      warn: (message, detail) => console.warn(`[remote-usage] ${message}`, detail || ''),
+      debug: (message, detail) => console.log(`[remote-usage] ${message}`, detail || '')
+    }
+  });
+  return remoteUsageRuntime;
+}
+
+function statsWithRemoteUsage(stats) {
+  if (!stats) return stats;
+  const runtime = remoteUsageRuntime;
+  const remote = runtime?.getCompositionState?.() || {};
+  const localName = lastCollectedDevice?.hostname
+    || localDevice?.hostname
+    || settings?.tokenMAndroidDesktopName
+    || '';
+  return composeUsageSources({
+    stats,
+    remoteItems: remote.items || [],
+    remoteState: remote,
+    localDeviceId: settings?.deviceId || '',
+    localSourceName: localName,
+    nowMs: Date.now()
+  });
+}
+
 function electronPresentationStats(stats) {
-  return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
+  // Keep this function usable by the source-level presentation tests, which
+  // evaluate it in isolation with only the projection dependencies.
+  const composed = typeof remoteUsageRuntime !== 'undefined' && remoteUsageRuntime
+    ? statsWithRemoteUsage(stats)
+    : stats;
+  return projectModelAliasStats(projectLimitStatsForDisplay(composed, {
     localDeviceId: settings?.deviceId,
     syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
@@ -5551,6 +5605,7 @@ function reconfigureUsageRuntimeForMode() {
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
 function stopAll() {
+  remoteUsageRuntime?.stop();
   tokenMNotificationRuntime?.shutdownSync();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
@@ -5690,6 +5745,7 @@ async function fetchStats(options = {}) {
   const requestGeneration = hubModeGeneration;
   const requestHubIdentity = currentHubStatsIdentity('client');
   const force = Boolean(options?.force);
+  if (force) void ensureRemoteUsageRuntime().refresh({ force: true, reason: 'manual' });
   // forceHistory and forceSelfSync stay independent of `force` on purpose: tool
   // settings, account sign-ins and limits actions all refresh with { force: true },
   // so folding them in would spawn the expensive `tokscale graph` — and the Cursor
@@ -6696,6 +6752,7 @@ app.whenReady().then(() => {
       macWidgetSnapshotController?.resume();
     }
   });
+  ensureRemoteUsageRuntime().start();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();

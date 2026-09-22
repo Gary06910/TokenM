@@ -3698,6 +3698,19 @@ html.is-windows .settings-panel select option {
   content: 'you';
 }
 .row.local.stale .row-name::after { display: none; }
+.home-device-status {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.home-device-status.stale { color: var(--muted); }
+.home-device-status.unavailable { color: var(--warning, var(--muted)); }
 .shell.session-mode .breakdown {
   gap: 7px;
 }
@@ -5989,6 +6002,44 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
 }
 .device-breakdown { gap: 6px; }
+.device-profile-heading {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.device-profile-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(var(--overlay-rgb), 0.07);
+}
+.device-profile-row.stale { color: var(--muted); }
+.device-profile-label {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+.device-profile-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-profile-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9px;
+}
+.device-profile-value {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
 .device-tool {
   display: grid;
   gap: 2px;

@@ -2094,6 +2094,14 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
+    (deviceDetail.profiles || []).map((profile) => [
+      profile.id,
+      profile.name,
+      profile.value,
+      profile.cost,
+      profile.stale,
+      profile.receivedAt
+    ]),
     deviceDetail.tools.map((tool) => [
       tool.key,
       tool.value,
@@ -2106,7 +2114,36 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
 
   const content = document.createElement('div');
   content.className = 'accordion-content device-breakdown';
-  if (deviceDetail.tools.length === 0) {
+  const profiles = Array.isArray(deviceDetail.profiles) ? deviceDetail.profiles : [];
+  if (profiles.length > 0) {
+    const profileHeading = document.createElement('div');
+    profileHeading.className = 'device-profile-heading';
+    profileHeading.textContent = t('devices.remote.profiles');
+    content.append(profileHeading);
+    for (const profile of profiles) {
+      const profileRow = document.createElement('div');
+      profileRow.className = `device-profile-row${profile.stale ? ' stale' : ''}`;
+      const profileLabel = document.createElement('div');
+      profileLabel.className = 'device-profile-label';
+      const profileName = document.createElement('span');
+      profileName.className = 'device-profile-name';
+      profileName.textContent = profile.name || profile.id || 'profile';
+      const profileMeta = document.createElement('span');
+      profileMeta.className = 'device-profile-meta';
+      profileMeta.textContent = [
+        profile.client || 'codex',
+        profile.stale ? t('devices.remote.stale') : t('devices.remote.fresh'),
+        deviceSyncedLabel(profile.receivedAt)
+      ].filter(Boolean).join(' · ');
+      profileLabel.append(profileName, profileMeta);
+      const profileValue = document.createElement('span');
+      profileValue.className = 'device-profile-value';
+      profileValue.textContent = formatNumber(profile.value || 0);
+      profileRow.append(profileLabel, profileValue);
+      content.append(profileRow);
+    }
+  }
+  if (deviceDetail.tools.length === 0 && profiles.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'device-breakdown-empty';
     empty.textContent = deviceDetail.emptyText;
@@ -2565,7 +2602,12 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
 }
 
 function deviceLabel(device) {
-  return device.deviceId || device.hostname || 'device';
+  if (device?.name) return String(device.name);
+  if (device?.displayName) return String(device.displayName);
+  if (device?.hostname) return String(device.hostname);
+  if (device?.kind === 'remote') return 'A800 Server';
+  if (device?.kind === 'local') return 'Local';
+  return 'device';
 }
 
 function deviceColor(stale) {
@@ -2625,7 +2667,64 @@ function buildFixedPeriodSourcesSnapshot() {
   });
 }
 
+function sourceRowsForPeriod() {
+  if (fixedPeriodRangesApi.isDerived(state.period)) return [];
+  const sources = Array.isArray(state.stats?.sources) ? state.stats.sources : [];
+  return sources.map((source, index) => {
+    const period = source?.periods?.[state.period] || {};
+    const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(source, state.period, {
+      clientLabels,
+      clientColors,
+      fallbackColor: clientColors.default,
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    });
+    const profiles = (Array.isArray(source?.profiles) ? source.profiles : []).map((profile) => {
+      const profilePeriod = profile?.periods?.[state.period] || {};
+      return {
+        id: String(profile?.id || '').trim(),
+        name: String(profile?.name || profile?.id || 'profile').trim(),
+        client: String(profile?.client || 'codex').trim(),
+        value: Math.max(0, Number(profilePeriod.totalTokens || 0)),
+        cost: Number(profilePeriod.costUsd || 0),
+        stale: profile?.stale === true,
+        receivedAt: profile?.receivedAt || null
+      };
+    });
+    const freshnessLabel = source?.kind === 'remote'
+      ? (source.stale ? t('devices.remote.stale') : t('devices.remote.fresh'))
+      : '';
+    const historyLabel = source?.kind === 'remote' && source?.historyCoverage?.available
+      ? t('devices.remote.history30')
+      : '';
+    const metaParts = [
+      deviceBreakdownApi.devicePlatformLabel(source?.platform),
+      freshnessLabel,
+      deviceSyncedLabel(source?.receivedAt || source?.updatedAt),
+      historyLabel
+    ].filter(Boolean);
+    if (source?.kind === 'remote' && profiles.length === 0) metaParts.push(t('devices.remote.unavailable'));
+    return {
+      key: String(source?.id || `source-${index}`),
+      name: deviceLabel(source),
+      value: breakdown.totalTokens,
+      cost: Number(period.costUsd || 0),
+      color: deviceColor(Boolean(source?.stale)),
+      stale: Boolean(source?.stale),
+      platform: source?.platform || '',
+      local: source?.isLocal === true,
+      deviceDetail: {
+        ...breakdown,
+        profiles,
+        emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
+        metaParts
+      }
+    };
+  }).sort((a, b) => Number(b.local) - Number(a.local) || b.value - a.value || a.name.localeCompare(b.name));
+}
+
 function deviceRowsForPeriod() {
+  const sourceRows = sourceRowsForPeriod();
+  if (sourceRows.length > 0) return sourceRows;
   const localId = state.settings?.deviceId || '';
   return fixedPeriodDevices().map((device) => {
     const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
@@ -2637,7 +2736,7 @@ function deviceRowsForPeriod() {
     const period = device.periods?.[state.period] || {};
     const runtime = deviceRuntimeLabel(device.agentRuntime);
     const version = device.agentVersion ? `${runtime ? `${runtime} ` : ''}v${device.agentVersion}` : runtime;
-    const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.updatedAt)].filter(Boolean);
+    const metaParts = [deviceBreakdownApi.devicePlatformLabel(device.platform, device.osName, device.osVersion), version, deviceSyncedLabel(device.receivedAt || device.updatedAt)].filter(Boolean);
     return {
       key: device.deviceId,
       name: deviceLabel(device),
@@ -8164,12 +8263,15 @@ function renderHomeToolModule(period) {
 }
 
 function renderHomeDeviceModule() {
-  const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
-  const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
-    localDeviceId: state.settings?.deviceId || '',
-    period: state.period,
-    limit: 4
-  });
+  const sourceMode = Array.isArray(state.stats?.sources) && !fixedPeriodRangesApi.isDerived(state.period);
+  const { module, body } = homeModuleShell('device', sourceMode ? t('home.allSources') : t('home.devices'), 'device');
+  const rows = sourceMode
+    ? homeOverviewApi.homeSourceRows(state.stats.sources, { period: state.period, limit: 4 })
+    : homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
+      localDeviceId: state.settings?.deviceId || '',
+      period: state.period,
+      limit: 4
+    });
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -8197,6 +8299,14 @@ function renderHomeDeviceModule() {
       badge.className = 'home-device-badge';
       badge.textContent = 'you';
       label.append(badge);
+    }
+    if (row.isRemote && row.status !== 'ready') {
+      const status = document.createElement('span');
+      status.className = `home-device-status ${row.status}`;
+      status.textContent = row.status === 'stale'
+        ? t('devices.remote.stale')
+        : t('devices.remote.unavailable');
+      label.append(status);
     }
     const value = document.createElement('span');
     value.className = 'home-list-value';

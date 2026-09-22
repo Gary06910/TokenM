@@ -208,6 +208,37 @@
       .map(({ index: _index, ...row }) => row);
   }
 
+  function homeSourceRows(sources, { period = 'today', limit = 4 } = {}) {
+    return (sources || [])
+      .map((source, index) => {
+        const key = String(source?.id || `source-${index}`).trim() || `source-${index}`;
+        const value = Math.max(0, Number(source?.periods?.[period]?.totalTokens || 0));
+        const status = source?.stale === true
+          ? 'stale'
+          : (source?.kind === 'remote' && source?.profiles?.length === 0 ? 'unavailable' : 'ready');
+        return {
+          key,
+          name: String(source?.name || '').trim() || (source?.kind === 'remote' ? 'A800 Server' : 'Local'),
+          value,
+          platform: source?.platform || '',
+          kind: source?.kind || 'local',
+          isLocal: source?.isLocal === true,
+          isRemote: source?.kind === 'remote',
+          isStale: source?.stale === true,
+          status,
+          profiles: Array.isArray(source?.profiles) ? source.profiles : [],
+          index
+        };
+      })
+      .sort((a, b) => Number(a.isRemote) - Number(b.isRemote)
+        || Number(a.isLocal) - Number(b.isLocal)
+        || Number(b.value) - Number(a.value)
+        || Number(a.isStale) - Number(b.isStale)
+        || a.index - b.index)
+      .slice(0, Math.max(0, Number(limit) || 0))
+      .map(({ index: _index, ...row }) => row);
+  }
+
   function providerEntriesById(providers) {
     const byId = new Map();
     for (const provider of providers || []) {
@@ -460,6 +491,7 @@
     longRangePeakDayTokens,
     homeToolRows,
     homeDeviceRows,
+    homeSourceRows,
     homeTrendSummary,
     activityStatsForPeriod,
     pickHomeHistory,
