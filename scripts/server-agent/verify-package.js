@@ -14,6 +14,8 @@ const REQUIRED_PATHS = Object.freeze([
   'app/node_modules',
   'app/package.json',
   'app/LICENSE',
+  'systemd/toknow-agent.service',
+  'systemd/remove-user-service.sh',
   'VERSION'
 ]);
 
@@ -114,14 +116,66 @@ function verifyLauncher(packageRoot, errors) {
 
 function verifyInstallScript(packageRoot, errors) {
   const script = readText(path.join(packageRoot, 'install.sh'));
-  if (/\bsudo\b|\/usr\/local|\/etc\/systemd|systemd/i.test(script)) {
-    errors.push('install.sh contains a system-wide or systemd installation');
+  if (/\bsudo\b|\/usr\/local|\/etc\/systemd\/system|loginctl\s+enable-linger/i.test(script)) {
+    errors.push('install.sh contains a privileged or system-wide installation');
   }
   if (!script.includes('TO_KNOW_INSTALL_ROOT') || !script.includes('--prefix')) {
     errors.push('install.sh does not expose the installation-root override');
   }
   if (!script.includes('$HOME/.local/share/toknow-agent') || !script.includes('$HOME/.local/bin/toknow-agent')) {
     errors.push('install.sh does not use the required default user installation paths');
+  }
+  if (!script.includes('--user-service')
+    || !script.includes('systemctl --user daemon-reload')
+    || !script.includes('systemctl --user enable --now toknow-agent.service')) {
+    errors.push('install.sh does not expose the explicit systemd user-service flow');
+  }
+  if (!script.includes('USER_SERVICE') || !script.includes('USER_SERVICE" -eq 1')) {
+    errors.push('install.sh does not keep service installation behind an explicit option');
+  }
+}
+
+function verifyServiceUnit(packageRoot, errors) {
+  const unitPath = path.join(packageRoot, 'systemd', 'toknow-agent.service');
+  if (!pathExists(packageRoot, 'systemd/toknow-agent.service')) return;
+  const unit = readText(unitPath);
+  const requiredLines = [
+    ['user service marker', /^# Managed by To Know Server Agent installer\.$/m],
+    ['service type', /^Type=simple$/m],
+    ['stable launcher ExecStart', /^ExecStart=%h\/\.local\/bin\/toknow-agent run$/m],
+    ['always restart policy', /^Restart=always$/m],
+    ['restart delay', /^RestartSec=5$/m],
+    ['stop timeout', /^TimeoutStopSec=15$/m],
+    ['control-group kill mode', /^KillMode=control-group$/m],
+    ['private umask', /^UMask=0077$/m],
+    ['no new privileges', /^NoNewPrivileges=true$/m],
+    ['private temporary directory', /^PrivateTmp=true$/m],
+    ['default target', /^WantedBy=default\.target$/m]
+  ];
+  for (const [label, pattern] of requiredLines) {
+    if (!pattern.test(unit)) errors.push(`systemd unit is missing ${label}`);
+  }
+  if (/^ExecStart=.*(?:\/\d+\.\d+\.\d+\/|\/v\d+\.\d+\.\d+\/)/mi.test(unit)) {
+    errors.push('systemd unit ExecStart uses a version-specific path');
+  }
+  if (/\b(?:CODEX_HOME|Authorization|ownerId|desktopId|CID|credential|secret|bridge token)\b/i.test(unit)) {
+    errors.push('systemd unit contains credential-like data');
+  }
+  if (/\/etc\/systemd\/system|\bsudo\b|loginctl\s+enable-linger/i.test(unit)) {
+    errors.push('systemd unit contains a system-wide or privileged installation');
+  }
+}
+
+function verifyUserServiceHelper(packageRoot, errors) {
+  const helperPath = path.join(packageRoot, 'systemd', 'remove-user-service.sh');
+  if (!pathExists(packageRoot, 'systemd/remove-user-service.sh')) return;
+  const helper = readText(helperPath);
+  if (!helper.includes('systemctl --user disable --now toknow-agent.service')
+    || !helper.includes('systemctl --user daemon-reload')) {
+    errors.push('user-service removal helper does not use systemctl --user');
+  }
+  if (/\bsudo\b|\/etc\/systemd\/system|loginctl\s+enable-linger/i.test(helper)) {
+    errors.push('user-service removal helper contains a privileged or system-wide operation');
   }
 }
 
@@ -149,6 +203,8 @@ function verifyPackage(packageRoot, options = {}) {
 
   if (pathExists(root, 'bin/toknow-agent')) verifyLauncher(root, errors);
   if (pathExists(root, 'install.sh')) verifyInstallScript(root, errors);
+  verifyServiceUnit(root, errors);
+  verifyUserServiceHelper(root, errors);
 
   let packageJson;
   let runtimeManifest;

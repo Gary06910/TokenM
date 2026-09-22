@@ -11,6 +11,8 @@ const root = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(root, 'scripts', 'server-agent', 'runtime.json');
 const launcherPath = path.join(root, 'bin', 'toknow-agent');
 const installPath = path.join(root, 'install.sh');
+const serviceSourcePath = path.join(root, 'packaging', 'server-agent', 'toknow-agent.service');
+const serviceRemovalSourcePath = path.join(root, 'packaging', 'server-agent', 'remove-user-service.sh');
 const packageScriptPath = path.join(root, 'scripts', 'server-agent', 'package-linux-x64.js');
 const runtime = require('../../scripts/server-agent/fetch-node-runtime');
 const packageScript = require('../../scripts/server-agent/package-linux-x64');
@@ -27,6 +29,7 @@ function createVerifierFixture({ omitNodeModules = false } = {}) {
   fs.mkdirSync(path.join(packageRoot, 'runtime', 'node', 'bin'), { recursive: true });
   fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'server-agent'), { recursive: true });
   fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'shared'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'systemd'), { recursive: true });
   if (!omitNodeModules) fs.mkdirSync(path.join(packageRoot, 'app', 'node_modules'), { recursive: true });
   fs.writeFileSync(path.join(packageRoot, 'bin', 'toknow-agent'), read(launcherPath), 'utf8');
   fs.writeFileSync(path.join(packageRoot, 'install.sh'), read(installPath), 'utf8');
@@ -35,6 +38,8 @@ function createVerifierFixture({ omitNodeModules = false } = {}) {
   fs.writeFileSync(path.join(packageRoot, 'runtime', 'node', 'bin', 'node'), 'bundled node placeholder\n', 'utf8');
   fs.writeFileSync(path.join(packageRoot, 'app', 'package.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
   fs.writeFileSync(path.join(packageRoot, 'app', 'LICENSE'), read(path.join(root, 'LICENSE')), 'utf8');
+  fs.copyFileSync(serviceSourcePath, path.join(packageRoot, 'systemd', 'toknow-agent.service'));
+  fs.copyFileSync(serviceRemovalSourcePath, path.join(packageRoot, 'systemd', 'remove-user-service.sh'));
   return { packageRoot, manifest };
 }
 
@@ -111,10 +116,25 @@ test('install script supports a user prefix override and never touches user stat
   const install = read(installPath);
   assert.match(install, /TO_KNOW_INSTALL_ROOT/);
   assert.match(install, /--prefix/);
+  assert.match(install, /--user-service/);
   assert.match(install, /\$HOME\/\.local\/share\/toknow-agent/);
   assert.match(install, /\$HOME\/\.local\/bin\/toknow-agent/);
-  assert.doesNotMatch(install, /\bsudo\b|\/usr\/local|systemd/i);
+  assert.doesNotMatch(install, /\bsudo\b|\/usr\/local|\/etc\/systemd\/system|loginctl\s+enable-linger/i);
   assert.doesNotMatch(install, /\.config\/toknow-agent|credentials\.json|settings\.json|auth\.json|outbox/i);
+});
+
+test('packaged systemd user unit uses the stable launcher and contains no secrets', () => {
+  const unit = read(serviceSourcePath);
+  assert.match(unit, /^ExecStart=%h\/\.local\/bin\/toknow-agent run$/m);
+  assert.match(unit, /^Restart=always$/m);
+  assert.match(unit, /^RestartSec=5$/m);
+  assert.match(unit, /^KillMode=control-group$/m);
+  assert.match(unit, /^TimeoutStopSec=15$/m);
+  assert.match(unit, /^UMask=0077$/m);
+  assert.match(unit, /^NoNewPrivileges=true$/m);
+  assert.match(unit, /^PrivateTmp=true$/m);
+  assert.match(unit, /^WantedBy=default\.target$/m);
+  assert.doesNotMatch(unit, /1\.0\.0|CODEX_HOME|Authorization|ownerId|desktopId|CID|credential|secret|bridge token/i);
 });
 
 test('server package manifest uses root version and has no desktop entry point', () => {
@@ -126,6 +146,18 @@ test('server package manifest uses root version and has no desktop entry point',
   assert.equal(Object.hasOwn(manifest.dependencies, 'electron-updater'), false);
   assert.equal(Object.hasOwn(manifest.dependencies, '@xhayper/discord-rpc'), false);
   assert.equal(manifest.dependencies.tokscale, '^4.17.0');
+});
+
+test('Linux package source includes the systemd user-service assets', () => {
+  const source = read(packageScriptPath);
+  assert.equal(packageScript.SERVER_AGENT_SERVICE_SOURCE_DIR, path.join('packaging', 'server-agent'));
+  assert.ok(source.includes("toknow-agent.service"));
+  assert.ok(source.includes("remove-user-service.sh"));
+  assert.deepEqual(packageVerifier.REQUIRED_PATHS.slice(-3), [
+    'systemd/toknow-agent.service',
+    'systemd/remove-user-service.sh',
+    'VERSION'
+  ]);
 });
 
 test('package copy policy preserves symlink text and never dereferences', () => {

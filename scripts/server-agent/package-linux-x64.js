@@ -19,6 +19,7 @@ const TARGET_PLATFORM = 'linux';
 const TARGET_ARCH = 'x64';
 const SERVER_AGENT_PACKAGE_NAME = 'to-know-server-agent';
 const SERVER_AGENT_PACKAGE_DIR = 'to-know-agent';
+const SERVER_AGENT_SERVICE_SOURCE_DIR = path.join('packaging', 'server-agent');
 const EXCLUDED_PRODUCTION_DEPENDENCIES = new Set(['@xhayper/discord-rpc', 'electron-updater']);
 
 function readJson(filePath) {
@@ -208,10 +209,19 @@ async function packageLinuxX64({
   );
   copyFile(path.join(root, 'bin', 'toknow-agent'), path.join(packageRoot, 'bin', 'toknow-agent'));
   copyFile(path.join(root, 'install.sh'), path.join(packageRoot, 'install.sh'));
+  copyFile(
+    path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'toknow-agent.service'),
+    path.join(packageRoot, 'systemd', 'toknow-agent.service')
+  );
+  copyFile(
+    path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'remove-user-service.sh'),
+    path.join(packageRoot, 'systemd', 'remove-user-service.sh')
+  );
   fs.writeFileSync(path.join(packageRoot, 'VERSION'), `${rootPackage.version}\n`, 'utf8');
   fs.writeFileSync(path.join(runtimeRoot, 'manifest.json'), `${JSON.stringify(runtimeManifest, null, 2)}\n`, 'utf8');
   fs.chmodSync(path.join(packageRoot, 'bin', 'toknow-agent'), 0o755);
   fs.chmodSync(path.join(packageRoot, 'install.sh'), 0o755);
+  fs.chmodSync(path.join(packageRoot, 'systemd', 'remove-user-service.sh'), 0o755);
 
   const nodeRuntime = await fetchRuntime({ manifest: runtimeManifest });
   assertBundledNode(nodeRuntime.nodeRoot, runtimeManifest.nodeVersion, spawn);
@@ -236,6 +246,7 @@ module.exports = {
   ROOT,
   SERVER_AGENT_PACKAGE_DIR,
   SERVER_AGENT_PACKAGE_NAME,
+  SERVER_AGENT_SERVICE_SOURCE_DIR,
   TARGET_ARCH,
   TARGET_PLATFORM,
   assertBuildHost,
