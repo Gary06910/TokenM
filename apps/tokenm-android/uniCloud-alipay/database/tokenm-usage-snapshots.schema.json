@@ -1,0 +1,54 @@
+{
+  "bsonType": "object",
+  "required": [
+    "_id",
+    "ownerId",
+    "desktopId",
+    "profileId",
+    "profileName",
+    "snapshotSchemaVersion",
+    "snapshot",
+    "createdAtMs",
+    "updatedAtMs",
+    "receivedAtMs"
+  ],
+  "permission": {
+    "read": false,
+    "create": false,
+    "update": false,
+    "delete": false,
+    "count": false
+  },
+  "properties": {
+    "_id": {
+      "bsonType": "string"
+    },
+    "ownerId": {
+      "bsonType": "string"
+    },
+    "desktopId": {
+      "bsonType": "string"
+    },
+    "profileId": {
+      "bsonType": "string"
+    },
+    "profileName": {
+      "bsonType": "string"
+    },
+    "snapshotSchemaVersion": {
+      "bsonType": "int"
+    },
+    "snapshot": {
+      "bsonType": "object"
+    },
+    "createdAtMs": {
+      "bsonType": "long"
+    },
+    "updatedAtMs": {
+      "bsonType": "long"
+    },
+    "receivedAtMs": {
+      "bsonType": "long"
+    }
+  }
+}

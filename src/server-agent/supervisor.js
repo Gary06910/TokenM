@@ -12,6 +12,7 @@ const {
 } = require('./protocol');
 const { validateServerSnapshot } = require('./snapshot');
 const { createServerNotificationRuntime } = require('./notificationRuntime');
+const { createUsageSyncRuntime } = require('./usageSyncRuntime');
 
 const DEFAULT_START_TIMEOUT_MS = 10_000;
 const DEFAULT_STOP_TIMEOUT_MS = 2_000;
@@ -56,6 +57,8 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
   let startPromise = null;
   let stopPromise = null;
   let pidFileWritten = false;
+  let usageSyncRuntime = null;
+  let usageSyncStatus = { state: options.once ? 'skipped_once' : 'not_started' };
   let notificationRuntime = null;
   let notificationStatus = { state: options.once === true ? 'skipped_once' : 'not_started' };
 
@@ -129,9 +132,12 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
       case MESSAGE_TYPES.SNAPSHOT:
         try {
           validateServerSnapshot(message.snapshot);
+          if (message.snapshot.profile.id !== record.profile.id) throw new Error('invalid-snapshot');
           latestSnapshots.set(record.profile.id, clone(message.snapshot));
           record.lastSnapshotAt = new Date().toISOString();
           record.state = 'running';
+          try { usageSyncRuntime?.accept(record.profile.id, message.snapshot); }
+          catch (_) { recordDiagnostic(record, 'usage_sync', 'sync-failed'); }
           options.onSnapshot?.(record.profile.id, clone(message.snapshot));
         } catch (error) {
           record.lastErrorCode = error.code || 'invalid-snapshot';
@@ -271,6 +277,13 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     startPromise = (async () => {
       writeSupervisorPid();
       await startNotificationRuntime();
+      if (!options.once) {
+        try {
+          usageSyncRuntime = (deps.createUsageSyncRuntime || createUsageSyncRuntime)({ config, paths, fetch: options.fetch,
+            stopTimeoutMs, onDiagnostic: options.onDiagnostic }, deps.usageSyncDeps || {});
+          usageSyncStatus = await usageSyncRuntime.start();
+        } catch (_) { usageSyncStatus = { state: 'unconfigured' }; }
+      }
       for (const profile of enabledProfiles()) spawnWorker(profile);
       await waitForStart();
       if (lifecycle !== 'stopping') lifecycle = 'running';
@@ -322,6 +335,8 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     stopPromise = (async () => {
       lifecycle = 'stopping';
       await stopNotificationRuntime();
+      try { if (usageSyncRuntime) usageSyncStatus = await usageSyncRuntime.stop(); }
+      catch (_) { usageSyncStatus = { state: 'stopped' }; }
       const records = [...workers.values()];
       for (const record of records) {
         if (!record.child || record.exited) continue;
@@ -363,6 +378,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     return {
       state: lifecycle,
       workerModel: 'child_process',
+      usageSync: usageSyncRuntime?.status() || usageSyncStatus,
       clientList: 'codex',
       profileCount: enabledProfiles().length,
       notification: clone(notificationStatus),

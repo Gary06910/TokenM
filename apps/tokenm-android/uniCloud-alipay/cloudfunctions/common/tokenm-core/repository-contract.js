@@ -1,6 +1,7 @@
 'use strict';
 
 const COLLECTIONS = Object.freeze({
+  usageSnapshots: 'tokenm-usage-snapshots',
   users: 'tokenm-users',
   desktops: 'tokenm-desktops',
   pairingSessions: 'tokenm-pairing-sessions',
@@ -14,6 +15,7 @@ const IDENTITY_COLLECTIONS = Object.freeze({
 });
 
 const REQUIRED_METHODS = Object.freeze([
+  'usageSnapshotCriteria',
   'taskHistoryCriteria',
   'countWhere',
   'findById',

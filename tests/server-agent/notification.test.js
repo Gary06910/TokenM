@@ -183,3 +183,29 @@ test('loopback bridge requires token and validated profile header', async (t) =>
   assert.equal(JSON.stringify(runtimeDocument).includes(CREDENTIAL), false);
   assert.equal(JSON.stringify(runtimeDocument).includes('codex'), false);
 });
+
+test('usage failures do not block real notification runtime synthetic events, and notification pause leaves usage independent', async (t) => {
+  const { createUsageSyncRuntime } = require('../../src/server-agent/usageSyncRuntime');
+  const { serializeServerSnapshot } = require('../../src/server-agent/snapshot');
+  for (const notificationPaused of [false, true]) {
+    const sent = [];
+    const setup = fixture(t, async (payload) => {
+      if (notificationPaused) throw Object.assign(Error('revoked'), { status: 401 });
+      sent.push(payload); return { status: 'created' };
+    });
+    let uploads = 0;
+    const sync = createUsageSyncRuntime({ config: setup.config, paths: setup.paths }, {
+      createClient: () => ({ putUsageSnapshot: async () => { uploads++; throw Object.assign(Error('unavailable'), { status: 500 }); } })
+    });
+    t.after(() => sync.stop());
+    await setup.runtime.start(); sync.start();
+    sync.accept('business', serializeServerSnapshot({}, { profile: { id: 'business', name: 'Business' } }).snapshot);
+    await setup.runtime.enqueue(rawInput('usage-isolation', 'turn-1'), 'business');
+    await setup.runtime.flush();
+    assert.equal(uploads, 1);
+    assert.equal(sync.status().state, 'ready');
+    assert.equal(sent.length, notificationPaused ? 0 : 1);
+    assert.equal(setup.runtime.publicStatus().state, notificationPaused ? 'blocked' : 'ready');
+    await sync.stop();
+  }
+});

@@ -1,0 +1,56 @@
+[
+  {
+    "IndexName": "desktop_profile_unique",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "desktopId",
+          "Direction": "1",
+          "Type": "varchar"
+        },
+        {
+          "Name": "profileId",
+          "Direction": "1",
+          "Type": "varchar"
+        }
+      ],
+      "MgoIsUnique": true
+    }
+  },
+  {
+    "IndexName": "owner_updated_id",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "ownerId",
+          "Direction": "1",
+          "Type": "varchar"
+        },
+        {
+          "Name": "updatedAtMs",
+          "Direction": "-1",
+          "Type": "long"
+        },
+        {
+          "Name": "_id",
+          "Direction": "-1",
+          "Type": "varchar"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  },
+  {
+    "IndexName": "desktop_cleanup",
+    "MgoKeySchema": {
+      "MgoIndexKeys": [
+        {
+          "Name": "desktopId",
+          "Direction": "1",
+          "Type": "varchar"
+        }
+      ],
+      "MgoIsUnique": false
+    }
+  }
+]

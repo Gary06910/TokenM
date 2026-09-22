@@ -38,6 +38,12 @@ function createHttpHandler({ application, getApplication, requestIdFactory } = {
         return response(201, { ...result, requestId });
       }
       const credential = bearerCredential(event.headers);
+      if (target === 'putUsage') {
+        return response(200, { ...await service.putUsageSnapshot(credential, parseJsonBody(event)), requestId });
+      }
+      if (target === 'getUsage') {
+        return response(200, { ...await service.listUsageSnapshots(credential, parseUsageQuery(event)), requestId });
+      }
       if (target === 'status') {
         const result = await service.status(credential);
         return response(200, {
@@ -68,17 +74,29 @@ function createHttpHandler({ application, getApplication, requestIdFactory } = {
 function route(event) {
   const method = typeof event.httpMethod === 'string' ? event.httpMethod.toUpperCase() : '';
   const path = typeof event.path === 'string' ? event.path : '';
+  if (method === 'PUT' && path === '/v1/desktop/usage') return 'putUsage';
+  if (method === 'GET' && path === '/v1/desktop/usage') return 'getUsage';
   if (method === 'POST' && path === '/v1/desktop/pair') return 'pair';
   if (method === 'GET' && path === '/v1/desktop/status') return 'status';
   if (method === 'POST' && path === '/v1/desktop/events') return 'events';
   if (method === 'POST' && path === '/v1/desktop/unpair-self') return 'unpairSelf';
   const knownPath = [
+    '/v1/desktop/usage',
     '/v1/desktop/pair',
     '/v1/desktop/status',
     '/v1/desktop/events',
     '/v1/desktop/unpair-self'
   ].includes(path);
   throw transportError('invalid_request', knownPath ? 405 : 404);
+}
+
+function parseUsageQuery(event) {
+  const query = event.queryStringParameters ?? {};
+  if (!query || typeof query !== 'object' || Array.isArray(query)
+    || Object.keys(query).some((key) => !['limit', 'cursor'].includes(key))) throw transportError('invalid_request');
+  if (query.limit !== undefined && (typeof query.limit !== 'string' || !/^[1-4]$/.test(query.limit))) throw transportError('invalid_request');
+  return { ...(query.limit === undefined ? {} : { limit: Number(query.limit) }),
+    ...(query.cursor === undefined ? {} : { cursor: query.cursor }) };
 }
 
 function parseJsonBody(event) {

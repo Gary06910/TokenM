@@ -1,6 +1,7 @@
 'use strict';
 
 const { isIP } = require('node:net');
+const { putUsageSnapshot, listUsageSnapshots } = require('./usage-service');
 const {
   createDesktopCredential,
   decryptSecret,
@@ -324,6 +325,7 @@ class TokenMApplication {
     const desktop = await this.requireOwnedDesktop(ownerId, assertDesktopId(input.desktopId));
     if (input.confirmation !== 'UNBIND') throw invalidRequest('confirmation');
     if (desktop.status === 'revoked') {
+      await this.repository.removeWhere(COLLECTIONS.usageSnapshots, { desktopId: desktop._id });
       return { ok: true, alreadyRevoked: true, desktop: publicDesktop(desktop) };
     }
     const nowMs = this.now();
@@ -338,6 +340,7 @@ class TokenMApplication {
       });
       return revoked;
     });
+    await this.repository.removeWhere(COLLECTIONS.usageSnapshots, { desktopId: desktop._id });
     return { ok: true, alreadyRevoked: false, desktop: publicDesktop(updated) };
   }
 
@@ -479,6 +482,7 @@ class TokenMApplication {
     await this.ensureUser(ownerId);
     const deletionRequestedAtMs = this.now();
     const cleanupCollections = [
+      [COLLECTIONS.usageSnapshots, { ownerId }],
       [COLLECTIONS.tasks, { ownerId }],
       [COLLECTIONS.desktops, { ownerId }],
       [COLLECTIONS.pairingSessions, { ownerId }],
@@ -574,6 +578,14 @@ class TokenMApplication {
       },
       credential: result.credential
     };
+  }
+
+  async putUsageSnapshot(credential, input) {
+    return putUsageSnapshot(this, credential, input);
+  }
+
+  async listUsageSnapshots(credential, input = {}) {
+    return listUsageSnapshots(this, credential, input);
   }
 
   async status(credential) {
@@ -846,6 +858,7 @@ class TokenMApplication {
         updatedAtMs: nowMs
       });
     });
+    await this.repository.removeWhere(COLLECTIONS.usageSnapshots, { desktopId: desktop._id });
     return { ok: true };
   }
 

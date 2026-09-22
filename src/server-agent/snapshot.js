@@ -362,6 +362,7 @@ function validateServerSnapshot(snapshot, options = {}) {
   const bytes = snapshotBytes(snapshot);
   const budget = options.budgetBytes || SERVER_SNAPSHOT_BUDGET_BYTES;
   if (bytes > budget) throw new SnapshotBudgetError(bytes, budget);
+  require('../shared/usageSnapshot').validateUsageSnapshot(snapshot);
   return { bytes };
 }
 

@@ -3,6 +3,7 @@
 const { randomInt, randomUUID } = require('node:crypto');
 
 const PREFIXES = Object.freeze({
+  usageSnapshot: 'usg',
   desktop: 'dev',
   mobileDevice: 'mob',
   pairingSession: 'pair',

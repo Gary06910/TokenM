@@ -17,6 +17,7 @@ const { createHttpHandler, MAX_BODY_BYTES } = require(path.join(
 const FIXED_NOW = Date.parse('2026-08-23T08:00:00.000Z');
 const TEST_KEY = randomBytes(32);
 const COLLECTION_NAMES = Object.freeze([
+  'tokenm-usage-snapshots',
   'tokenm-users',
   'tokenm-desktops',
   'tokenm-pairing-sessions',
@@ -365,7 +366,7 @@ test('Cloud Object _after returns normal values and emits only safe uniCloud err
   assert.doesNotMatch(JSON.stringify(unknown), /database|credential/);
 });
 
-test('all six server-only schemas and支付宝 index files satisfy the frozen data contract', () => {
+test('all server-only schemas and支付宝 index files satisfy the frozen data contract', () => {
   const databaseRoot = path.join(projectRoot, 'database');
   const actualSchemas = fs.readdirSync(databaseRoot)
     .filter((name) => name.endsWith('.schema.json'))

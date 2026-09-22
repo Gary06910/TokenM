@@ -1,5 +1,8 @@
 'use strict';
 
+const { validateUsageSnapshot } = require('../usageSnapshot');
+const { validateStoredUsage, validateUsagePage } = require('../remoteUsage');
+
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_REQUEST_BYTES = 16 * 1024;
 const DESKTOP_ID_SOURCE = 'dev_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
@@ -226,6 +229,23 @@ function createAndroidClient(options) {
   if (!desktopId) throw new TypeError('A valid Android desktop credential is required');
   return {
     desktopId,
+    putUsageSnapshot: async (snapshot) => {
+      validateUsageSnapshot(snapshot);
+      const result = await request('PUT', '/v1/desktop/usage', { snapshot });
+      try {
+        validateStoredUsage(result);
+        if (result.profileId !== snapshot.profile.id) throw Error();
+        return result;
+      } catch (_) { throw new AndroidApiError('Invalid usage response', { code: 'invalid_response' }); }
+    },
+    listUsageSnapshots: async ({ limit = 4, cursor } = {}) => {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 4) throw new TypeError('Invalid usage limit');
+      if (cursor !== undefined && (typeof cursor !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(cursor))) throw new TypeError('Invalid usage cursor');
+      const query = new URLSearchParams({ limit: String(limit), ...(cursor === undefined ? {} : { cursor }) });
+      const result = await request('GET', '/v1/desktop/usage?' + query);
+      try { return validateUsagePage(result); }
+      catch (_) { throw new AndroidApiError('Invalid usage response', { code: 'invalid_response' }); }
+    },
     status: () => request('GET', '/v1/desktop/status'),
     sendEvent: async (payload) => validateEventResponse(
       await request('POST', '/v1/desktop/events', payload)

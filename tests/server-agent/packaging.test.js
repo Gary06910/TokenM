@@ -231,3 +231,14 @@ test('Windows package command is fail-closed instead of producing a fake Linux a
   assert.match(result.stderr, /must run on linux x64/i);
   assert.deepEqual(fs.readdirSync(outputRoot), []);
 });
+
+test('2C upload and remote contracts are included by Server source-copy rules', () => {
+  const source = read(packageScriptPath);
+  assert.ok(source.includes("copyTree(path.join(root, 'src', 'server-agent')"));
+  assert.ok(source.includes("copyTree(path.join(root, 'src', 'shared')"));
+  for (const relative of ['src/server-agent/usageSyncRuntime.js', 'src/shared/remoteUsage.js', 'src/shared/usageSnapshot.js', 'src/shared/notification/androidClient.js']) {
+    assert.equal(packageScript.privatePath(relative), false);
+    assert.equal(fs.existsSync(path.join(root, relative)), true);
+  }
+  assert.equal(source.includes("copyTree(path.join(root, 'src', 'electron')"), false);
+});

@@ -1,6 +1,7 @@
 'use strict';
 
 const { RepositoryConflictError } = require('./errors');
+const { COLLECTIONS } = require('./repository-contract');
 
 const DEVELOPMENT_SPACE_VALIDATION = Object.freeze({
   verifiedLocally: false,
@@ -23,6 +24,15 @@ class UniCloudRepository {
     }
     this.database = database;
     this.transaction = transaction;
+  }
+
+  usageSnapshotCriteria(ownerId, cursor) {
+    if (!cursor) return { ownerId };
+    const cmd = this.database.command;
+    return cmd.and({ ownerId }, cmd.or(
+      { updatedAtMs: cmd.lt(cursor.updatedAtMs) },
+      { updatedAtMs: cursor.updatedAtMs, _id: cmd.lt(cursor._id) }
+    ));
   }
 
   taskHistoryCriteria(ownerId, options = {}) {
@@ -72,7 +82,11 @@ class UniCloudRepository {
   async updateById(collection, id, patch) {
     const current = await this.findById(collection, id);
     if (!current) return null;
-    await execute(() => this.database.collection(collection).doc(id).update(patch));
+    // uniCloud recursively merges object updates; snapshots must replace the
+    // previous object, including model keys removed by later projections.
+    const update = collection === COLLECTIONS.usageSnapshots && Object.hasOwn(patch, 'snapshot')
+      ? { ...patch, snapshot: this.database.command.set(patch.snapshot) } : patch;
+    await execute(() => this.database.collection(collection).doc(id).update(update));
     return { ...current, ...structuredClone(patch), _id: id };
   }
 

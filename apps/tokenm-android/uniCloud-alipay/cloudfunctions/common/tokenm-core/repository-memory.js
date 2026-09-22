@@ -14,6 +14,10 @@ class MemoryRepository {
     this._transactionTail = Promise.resolve();
   }
 
+  usageSnapshotCriteria(ownerId, cursor) {
+    return { ownerId, ...(cursor ? { $usageAfter: cursor } : {}) };
+  }
+
   taskHistoryCriteria(ownerId, options = {}) {
     return { ownerId, userDeletedAtMs: { taskAbsent: true },
       ...(Number.isFinite(options.after) ? { createdAtMs: { taskAfter: options.after } } : {}),
@@ -169,7 +173,9 @@ function collectionMap(collections, collection) {
 }
 
 function matches(document, criteria) {
-  return Object.entries(criteria).every(([field, expected]) => (expected && typeof expected === 'object'
+  return Object.entries(criteria).every(([field, expected]) => (field === '$usageAfter'
+    ? document.updatedAtMs < expected.updatedAtMs || (document.updatedAtMs === expected.updatedAtMs && document._id < expected._id)
+    : expected && typeof expected === 'object'
     ? (expected.taskAbsent === true ? document[field] == null
       : expected.taskAfter !== undefined ? document[field] > expected.taskAfter
       : expected.taskThrough !== undefined ? document[field] <= expected.taskThrough
@@ -211,6 +217,8 @@ function enforceUnique(collection, candidate, map, excludedId = null) {
 
 function uniqueConstraints(collection, document) {
   switch (collection) {
+    case COLLECTIONS.usageSnapshots:
+      return [['desktop_profile_unique', ['desktopId', 'profileId']]];
     case COLLECTIONS.tasks:
       return [['desktop_event', ['desktopId', 'eventId']]];
     case COLLECTIONS.mobileDevices:
