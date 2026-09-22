@@ -13,9 +13,15 @@ const {
 const { validateServerSnapshot } = require('./snapshot');
 const { createServerNotificationRuntime } = require('./notificationRuntime');
 const { createUsageSyncRuntime } = require('./usageSyncRuntime');
-
-const DEFAULT_START_TIMEOUT_MS = 10_000;
-const DEFAULT_STOP_TIMEOUT_MS = 2_000;
+const {
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  DEFAULT_START_TIMEOUT_MS,
+  DEFAULT_STOP_TIMEOUT_MS,
+  SNAPSHOT_TIMEOUT_GRACE_MS,
+  resolveCommandTimeout,
+  resolveSnapshotTimeout,
+  resolveTimeout
+} = require('./timeouts');
 const MAX_DIAGNOSTICS = 32;
 
 function clone(value) {
@@ -48,8 +54,15 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
   const forkWorker = deps.fork || fork;
   const workerPath = options.workerPath || path.join(__dirname, 'profileWorker.js');
   const inheritedEnv = { ...(options.env || process.env) };
-  const startTimeoutMs = options.startTimeoutMs || DEFAULT_START_TIMEOUT_MS;
-  const stopTimeoutMs = options.stopTimeoutMs || DEFAULT_STOP_TIMEOUT_MS;
+  const startTimeoutMs = resolveTimeout(options.startTimeoutMs, DEFAULT_START_TIMEOUT_MS);
+  const stopTimeoutMs = resolveTimeout(options.stopTimeoutMs, DEFAULT_STOP_TIMEOUT_MS);
+  const effectiveCommandTimeoutMs = resolveCommandTimeout(
+    options.commandTimeoutMs,
+    inheritedEnv.TO_KNOW_TOKSCALE_TIMEOUT_MS
+  );
+  const snapshotTimeoutMs = resolveSnapshotTimeout(options.snapshotTimeoutMs, effectiveCommandTimeoutMs);
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
   const workers = new Map();
   const latestSnapshots = new Map();
   const makeNotificationRuntime = deps.createNotificationRuntime || createServerNotificationRuntime;
@@ -81,11 +94,11 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
       TO_KNOW_SERVER_AGENT_ONCE: options.once === true ? '1' : '0',
       TO_KNOW_WATCH_ENABLED: options.watchEnabled === false ? '0' : '1',
       TO_KNOW_HISTORY_ENABLED: options.historyEnabled === false ? '0' : '1',
-      TO_KNOW_PROJECTS_ENABLED: options.projectsEnabled === true ? '1' : '0'
+      TO_KNOW_PROJECTS_ENABLED: options.projectsEnabled === true ? '1' : '0',
+      TO_KNOW_TOKSCALE_TIMEOUT_MS: String(effectiveCommandTimeoutMs)
     };
     if (options.platform) env.TO_KNOW_PLATFORM = safeEnvValue(options.platform, 'unknown');
     if (options.allTimeSince) env.TO_KNOW_ALL_TIME_SINCE = safeEnvValue(options.allTimeSince, '2024-01-01');
-    if (options.commandTimeoutMs) env.TO_KNOW_TOKSCALE_TIMEOUT_MS = String(options.commandTimeoutMs);
     if (options.fixtureMode === true) env.TO_KNOW_SERVER_AGENT_TEST_FIXTURE = '1';
     else delete env.TO_KNOW_SERVER_AGENT_TEST_FIXTURE;
     return env;
@@ -253,10 +266,10 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     const records = [...workers.values()];
     if (records.length === 0) return Promise.resolve();
     return new Promise((resolve) => {
-      const deadline = setTimeout(resolve, startTimeoutMs);
+      const deadline = setTimer(resolve, startTimeoutMs);
       const check = () => {
         if (records.every((record) => record.ready || record.exited || record.lastErrorCode)) {
-          clearTimeout(deadline);
+          clearTimer(deadline);
           resolve();
         }
       };
@@ -292,16 +305,17 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     return startPromise;
   }
 
-  function waitForSnapshots(timeoutMs = startTimeoutMs) {
+  function waitForSnapshots(timeoutMs = snapshotTimeoutMs) {
+    const waitTimeoutMs = resolveTimeout(timeoutMs, snapshotTimeoutMs);
     const expected = enabledProfiles().map((profile) => profile.id);
     if (expected.length === 0 || expected.every((id) => latestSnapshots.has(id) || workers.get(id)?.lastErrorCode)) {
       return Promise.resolve(getAllSnapshots());
     }
     return new Promise((resolve) => {
-      const deadline = setTimeout(() => resolve(getAllSnapshots()), timeoutMs);
+      const deadline = setTimer(() => resolve(getAllSnapshots()), waitTimeoutMs);
       const check = () => {
         if (expected.every((id) => latestSnapshots.has(id) || workers.get(id)?.lastErrorCode)) {
-          clearTimeout(deadline);
+          clearTimer(deadline);
           resolve(getAllSnapshots());
         }
       };
@@ -317,14 +331,14 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     if (!record.child || record.exited) return Promise.resolve();
     return new Promise((resolve) => {
       const child = record.child;
-      const timer = setTimeout(() => {
+      const timer = setTimer(() => {
         if (!record.exited) {
           try { child.kill(); } catch (_) {}
         }
         resolve();
       }, stopTimeoutMs);
       child.once('exit', () => {
-        clearTimeout(timer);
+        clearTimer(timer);
         resolve();
       });
     });
@@ -386,6 +400,16 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     };
   }
 
+  function getTimeouts() {
+    return {
+      startTimeoutMs,
+      stopTimeoutMs,
+      effectiveCommandTimeoutMs,
+      snapshotTimeoutMs,
+      snapshotTimeoutGraceMs: SNAPSHOT_TIMEOUT_GRACE_MS
+    };
+  }
+
   return {
     config,
     paths,
@@ -395,13 +419,16 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     getSnapshot,
     getAllSnapshots,
     getDiagnostics,
+    getTimeouts,
     getNotificationStatus: () => clone(notificationStatus),
     _buildWorkerEnv: buildWorkerEnv
   };
 }
 
 module.exports = {
+  DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_START_TIMEOUT_MS,
   DEFAULT_STOP_TIMEOUT_MS,
+  SNAPSHOT_TIMEOUT_GRACE_MS,
   createServerAgentSupervisor
 };

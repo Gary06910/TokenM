@@ -18,6 +18,7 @@ const {
   serializeServerSnapshot,
   validateServerSnapshot
 } = require('./snapshot');
+const { DEFAULT_COMMAND_TIMEOUT_MS, parseTimeout } = require('./timeouts');
 
 function safeErrorCode(error, fallback = 'worker-failed') {
   if (error?.code === 'snapshot-budget-exceeded') return error.code;
@@ -168,7 +169,7 @@ function createProfileWorker(options = {}, deps = {}) {
       return { stop, getSnapshotPublished: () => snapshotPublished };
     }
 
-    const commandTimeoutMs = parseNumber(process.env.TO_KNOW_TOKSCALE_TIMEOUT_MS, 120 * 1000);
+    const commandTimeoutMs = parseTimeout(process.env.TO_KNOW_TOKSCALE_TIMEOUT_MS) ?? DEFAULT_COMMAND_TIMEOUT_MS;
     const watchEnabled = parseBoolean(process.env.TO_KNOW_WATCH_ENABLED, true);
     const historyEnabled = parseBoolean(process.env.TO_KNOW_HISTORY_ENABLED, true);
     const projectsEnabled = parseBoolean(process.env.TO_KNOW_PROJECTS_ENABLED, false);

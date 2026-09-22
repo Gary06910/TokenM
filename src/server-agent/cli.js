@@ -34,6 +34,19 @@ function commandError(code, message = code) {
   return error;
 }
 
+function enabledProfileIds(config) {
+  return config.profiles.filter((profile) => profile.enabled).map((profile) => profile.id);
+}
+
+function assertCompleteSnapshots(config, snapshots) {
+  const expected = enabledProfileIds(config);
+  if (!snapshots || typeof snapshots !== 'object' || Array.isArray(snapshots)
+    || expected.length === 0 || expected.some((profileId) => !Object.hasOwn(snapshots, profileId))) {
+    throw commandError('snapshot_incomplete');
+  }
+  return snapshots;
+}
+
 function optionValue(args, ...names) {
   for (const name of names) {
     if (args[name] !== undefined) return args[name];
@@ -144,7 +157,7 @@ async function runHookFailOpen(args) {
   return undefined;
 }
 
-async function run(argv = process.argv.slice(2)) {
+async function run(argv = process.argv.slice(2), deps = {}) {
   if (isVersionRequest(argv)) {
     const version = readServerAgentVersion();
     process.stdout.write(`To Know Server Agent ${version}\n`);
@@ -159,7 +172,8 @@ async function run(argv = process.argv.slice(2)) {
   if (!['run', 'once'].includes(command)) throw commandError('unknown_server_agent_command');
   const paths = pathsForArgs(args);
   const { config } = configForArgs(args, paths);
-  const { createServerAgentSupervisor } = require('./supervisor');
+  const createServerAgentSupervisor = deps.createServerAgentSupervisor
+    || require('./supervisor').createServerAgentSupervisor;
   const supervisor = createServerAgentSupervisor({
     config,
     paths,
@@ -170,11 +184,14 @@ async function run(argv = process.argv.slice(2)) {
 
   await supervisor.start();
   if (command === 'once') {
-    await supervisor.waitForSnapshots();
-    const snapshots = supervisor.getAllSnapshots();
-    process.stdout.write(`${JSON.stringify(snapshots)}\n`);
-    await supervisor.stop();
-    return snapshots;
+    try {
+      await supervisor.waitForSnapshots();
+      const snapshots = assertCompleteSnapshots(config, supervisor.getAllSnapshots());
+      process.stdout.write(`${JSON.stringify(snapshots)}\n`);
+      return snapshots;
+    } finally {
+      await supervisor.stop();
+    }
   }
 
   const stop = () => { void supervisor.stop(); };
@@ -195,6 +212,8 @@ module.exports = {
   isVersionRequest,
   packageJsonPath,
   readServerAgentVersion,
+  assertCompleteSnapshots,
+  enabledProfileIds,
   run,
   runHookFailOpen,
   runHooks
