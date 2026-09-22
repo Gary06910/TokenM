@@ -16,6 +16,7 @@ const { writePrivateJsonAtomic } = require('../../src/shared/credentialStore');
 
 const DESKTOP_ID = 'dev_11111111-1111-4111-8111-111111111111';
 const CREDENTIAL = `tm_uc_d1.${DESKTOP_ID}.${'x'.repeat(43)}`;
+const TEST_NOW_MS = Date.parse('2026-09-21T10:05:00.000Z');
 
 function rawInput(sessionId = 'session-1', turnId = 'turn-1') {
   return {
@@ -51,7 +52,18 @@ function fixture(t, send, runtimeOptions = {}) {
     desktopId: DESKTOP_ID,
     desktopName: 'A800 Server'
   });
-  const runtime = createServerNotificationRuntime({ config, paths, fetch: async () => ({}), ...runtimeOptions }, {
+  const { outboxOptions = {}, ...otherRuntimeOptions } = runtimeOptions;
+  const runtime = createServerNotificationRuntime({
+    config,
+    paths,
+    fetch: async () => ({}),
+    ...otherRuntimeOptions,
+    now: () => TEST_NOW_MS,
+    outboxOptions: {
+      ...outboxOptions,
+      now: () => TEST_NOW_MS
+    }
+  }, {
     createAndroidClient: () => ({ sendEvent: send }),
     randomBytes: () => crypto.createHash('sha256').update('test-token').digest()
   });
@@ -106,7 +118,13 @@ test('server outbox survives offline restart and flushes after recovery', async 
   assert.equal(JSON.parse(fs.readFileSync(first.outboxPath, 'utf8')).items.length, 1);
 
   const sent = [];
-  const secondRuntime = createServerNotificationRuntime({ config: first.config, paths: first.paths, fetch: async () => ({}) }, {
+  const secondRuntime = createServerNotificationRuntime({
+    config: first.config,
+    paths: first.paths,
+    fetch: async () => ({}),
+    now: () => TEST_NOW_MS,
+    outboxOptions: { now: () => TEST_NOW_MS }
+  }, {
     createAndroidClient: () => ({
       sendEvent: async (payload) => {
         sent.push(payload);
