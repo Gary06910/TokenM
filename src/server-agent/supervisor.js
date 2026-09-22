@@ -23,6 +23,8 @@ const {
   resolveTimeout
 } = require('./timeouts');
 const MAX_DIAGNOSTICS = 32;
+const WORKER_RESTART_INITIAL_MS = 1_000;
+const WORKER_RESTART_MAX_MS = 30_000;
 
 function clone(value) {
   if (value === undefined) return undefined;
@@ -65,6 +67,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
   const clearTimer = deps.clearTimeout || clearTimeout;
   const workers = new Map();
   const latestSnapshots = new Map();
+  const snapshotWaiters = new Set();
   const makeNotificationRuntime = deps.createNotificationRuntime || createServerNotificationRuntime;
   let lifecycle = 'created';
   let startPromise = null;
@@ -108,6 +111,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     return {
       profile,
       child: null,
+      generation: 0,
       state: 'created',
       ready: false,
       stopped: false,
@@ -116,8 +120,38 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
       signal: null,
       lastErrorCode: null,
       lastSnapshotAt: null,
+      restartCount: 0,
+      restartTimer: null,
+      restartScheduledAt: null,
+      restartPending: false,
       diagnostics: []
     };
+  }
+
+  function isActiveLifecycle() {
+    return lifecycle === 'starting' || lifecycle === 'running';
+  }
+
+  function isCurrentWorker(record, child, generation) {
+    return record.generation === generation && record.child === child;
+  }
+
+  function notifySnapshotWaiters() {
+    for (const check of snapshotWaiters) check();
+  }
+
+  function cancelRestart(record) {
+    if (record.restartTimer !== null) clearTimer(record.restartTimer);
+    record.restartTimer = null;
+    record.restartScheduledAt = null;
+    record.restartPending = false;
+  }
+
+  function restartDelayMs(restartCount) {
+    return Math.min(
+      WORKER_RESTART_MAX_MS,
+      WORKER_RESTART_INITIAL_MS * (2 ** Math.max(0, restartCount - 1))
+    );
   }
 
   function recordDiagnostic(record, stage, code) {
@@ -127,7 +161,27 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     options.onDiagnostic?.({ profileId: record.profile.id, ...item });
   }
 
-  function handleWorkerMessage(record, message) {
+  function scheduleWorkerRestart(record) {
+    if (!isActiveLifecycle() || record.restartPending || record.restartTimer !== null) return;
+
+    record.restartCount += 1;
+    const delayMs = restartDelayMs(record.restartCount);
+    record.restartPending = true;
+    record.restartScheduledAt = new Date().toISOString();
+    record.restartTimer = setTimer(() => {
+      record.restartTimer = null;
+      record.restartScheduledAt = null;
+      record.restartPending = false;
+      if (!isActiveLifecycle()) return;
+      if (record.child && !record.exited) return;
+      spawnWorker(record.profile);
+      notifySnapshotWaiters();
+    }, delayMs);
+    notifySnapshotWaiters();
+  }
+
+  function handleWorkerMessage(record, child, generation, message) {
+    if (!isCurrentWorker(record, child, generation)) return;
     if (!validateWorkerMessage(message) || message.profileId !== record.profile.id) {
       recordDiagnostic(record, 'ipc', 'invalid-message');
       return;
@@ -149,6 +203,9 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
           latestSnapshots.set(record.profile.id, clone(message.snapshot));
           record.lastSnapshotAt = new Date().toISOString();
           record.state = 'running';
+          record.lastErrorCode = null;
+          record.restartCount = 0;
+          cancelRestart(record);
           try { usageSyncRuntime?.accept(record.profile.id, message.snapshot); }
           catch (_) { recordDiagnostic(record, 'usage_sync', 'sync-failed'); }
           options.onSnapshot?.(record.profile.id, clone(message.snapshot));
@@ -169,51 +226,105 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
       case MESSAGE_TYPES.STOPPED:
         record.stopped = true;
         record.state = 'stopped';
+        cancelRestart(record);
         break;
       default:
         break;
     }
+    notifySnapshotWaiters();
   }
 
-  function handleWorkerExit(record, code, signal) {
+  function handleWorkerExit(record, child, generation, code, signal) {
+    if (!isCurrentWorker(record, child, generation)) return;
     record.exited = true;
     record.exitCode = code;
     record.signal = signal;
     record.child = null;
-    if (lifecycle !== 'stopping' && lifecycle !== 'stopped') {
-      record.state = code === 0 ? 'stopped' : 'failed';
-      if (code !== 0 && !record.lastErrorCode) {
+    if (isActiveLifecycle() && !record.stopped) {
+      record.state = 'failed';
+      if (!record.lastErrorCode) {
         record.lastErrorCode = 'worker-exited';
         recordDiagnostic(record, 'process', record.lastErrorCode);
       }
+      scheduleWorkerRestart(record);
     } else {
       record.state = 'stopped';
     }
+    notifySnapshotWaiters();
+  }
+
+  function handleWorkerError(record, child, generation) {
+    if (!isCurrentWorker(record, child, generation)) return;
+    if (!record.lastErrorCode) {
+      record.lastErrorCode = 'worker-process-error';
+      recordDiagnostic(record, 'process', record.lastErrorCode);
+      options.onError?.({ profileId: record.profile.id, stage: 'process', code: record.lastErrorCode });
+    }
+    record.state = 'failed';
+    if (!isActiveLifecycle()) {
+      notifySnapshotWaiters();
+      return;
+    }
+
+    // A spawn/IPC error can be followed by an exit event, or by no exit event
+    // at all. Retire this generation immediately so either case has one retry
+    // path and a late event cannot touch the replacement worker.
+    record.exited = true;
+    record.exitCode = null;
+    record.signal = null;
+    record.child = null;
+    try { child.kill(); } catch (_) {}
+    scheduleWorkerRestart(record);
+    notifySnapshotWaiters();
+  }
+
+  function handleWorkerSpawnFailure(record, generation) {
+    if (record.generation !== generation) return;
+    record.exited = true;
+    record.state = 'failed';
+    record.lastErrorCode = 'worker-spawn-error';
+    recordDiagnostic(record, 'process', record.lastErrorCode);
+    options.onError?.({ profileId: record.profile.id, stage: 'process', code: record.lastErrorCode });
+    scheduleWorkerRestart(record);
+    notifySnapshotWaiters();
   }
 
   function spawnWorker(profile) {
-    const record = recordFor(profile);
+    const record = workers.get(profile.id) || recordFor(profile);
     workers.set(profile.id, record);
-    fs.mkdirSync(paths.profileStateDir(profile.id), { recursive: true });
-    const child = forkWorker(workerPath, [], {
-      env: buildWorkerEnv(profile),
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-      windowsHide: true
-    });
-    record.child = child;
+    if (!isActiveLifecycle()) return record;
+    if (record.child && !record.exited) return record;
+
+    record.generation += 1;
+    const generation = record.generation;
+    record.child = null;
     record.state = 'starting';
-    child.on('message', (message) => handleWorkerMessage(record, message));
-    child.on('error', (error) => {
-      // Preserve the first safe worker failure. A later IPC error can be a
-      // consequence of the worker already disconnecting during graceful stop.
-      if (!record.lastErrorCode) {
-        record.lastErrorCode = 'worker-process-error';
-        recordDiagnostic(record, 'process', record.lastErrorCode);
-        options.onError?.({ profileId: profile.id, stage: 'process', code: record.lastErrorCode });
-      }
-      if (typeof error?.message !== 'string') return;
-    });
-    child.on('exit', (code, signal) => handleWorkerExit(record, code, signal));
+    record.ready = false;
+    record.stopped = false;
+    record.exited = false;
+    record.exitCode = null;
+    record.signal = null;
+    record.lastErrorCode = null;
+    record.restartTimer = null;
+    record.restartScheduledAt = null;
+    record.restartPending = false;
+
+    let child;
+    try {
+      fs.mkdirSync(paths.profileStateDir(profile.id), { recursive: true });
+      child = forkWorker(workerPath, [], {
+        env: buildWorkerEnv(profile),
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        windowsHide: true
+      });
+      record.child = child;
+      child.on('message', (message) => handleWorkerMessage(record, child, generation, message));
+      child.on('error', () => handleWorkerError(record, child, generation));
+      child.on('exit', (code, signal) => handleWorkerExit(record, child, generation, code, signal));
+    } catch {
+      record.child = null;
+      handleWorkerSpawnFailure(record, generation);
+    }
     return record;
   }
 
@@ -297,9 +408,12 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
           usageSyncStatus = await usageSyncRuntime.start();
         } catch (_) { usageSyncStatus = { state: 'unconfigured' }; }
       }
-      for (const profile of enabledProfiles()) spawnWorker(profile);
+      for (const profile of enabledProfiles()) {
+        if (!isActiveLifecycle()) break;
+        spawnWorker(profile);
+      }
       await waitForStart();
-      if (lifecycle !== 'stopping') lifecycle = 'running';
+      if (lifecycle === 'starting') lifecycle = 'running';
       return getDiagnostics();
     })();
     return startPromise;
@@ -308,21 +422,26 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
   function waitForSnapshots(timeoutMs = snapshotTimeoutMs) {
     const waitTimeoutMs = resolveTimeout(timeoutMs, snapshotTimeoutMs);
     const expected = enabledProfiles().map((profile) => profile.id);
-    if (expected.length === 0 || expected.every((id) => latestSnapshots.has(id) || workers.get(id)?.lastErrorCode)) {
+    const isTerminal = (id) => {
+      const record = workers.get(id);
+      return record?.lastErrorCode && !record.restartPending;
+    };
+    if (expected.length === 0 || expected.every((id) => latestSnapshots.has(id) || isTerminal(id))) {
       return Promise.resolve(getAllSnapshots());
     }
     return new Promise((resolve) => {
-      const deadline = setTimer(() => resolve(getAllSnapshots()), waitTimeoutMs);
       const check = () => {
-        if (expected.every((id) => latestSnapshots.has(id) || workers.get(id)?.lastErrorCode)) {
+        if (expected.every((id) => latestSnapshots.has(id) || isTerminal(id))) {
+          snapshotWaiters.delete(check);
           clearTimer(deadline);
           resolve(getAllSnapshots());
         }
       };
-      for (const record of workers.values()) {
-        record.child?.on('message', check);
-        record.child?.on('exit', check);
-      }
+      const deadline = setTimer(() => {
+        snapshotWaiters.delete(check);
+        resolve(getAllSnapshots());
+      }, waitTimeoutMs);
+      snapshotWaiters.add(check);
       check();
     });
   }
@@ -348,6 +467,7 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
     if (stopPromise) return stopPromise;
     stopPromise = (async () => {
       lifecycle = 'stopping';
+      for (const record of workers.values()) cancelRestart(record);
       await stopNotificationRuntime();
       try { if (usageSyncRuntime) usageSyncStatus = await usageSyncRuntime.stop(); }
       catch (_) { usageSyncStatus = { state: 'stopped' }; }
@@ -359,6 +479,10 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
         } catch (_) {}
       }
       await Promise.all(records.map(waitForExit));
+      for (const record of records) {
+        record.stopped = true;
+        record.state = 'stopped';
+      }
       removeSupervisorPid();
       lifecycle = 'stopped';
       return getDiagnostics();
@@ -386,6 +510,8 @@ function createServerAgentSupervisor(options = {}, deps = {}) {
         signal: record.signal,
         lastErrorCode: record.lastErrorCode,
         lastSnapshotAt: record.lastSnapshotAt,
+        restartCount: record.restartCount,
+        restartPending: record.restartPending,
         diagnostics: clone(record.diagnostics)
       };
     }
@@ -430,5 +556,7 @@ module.exports = {
   DEFAULT_START_TIMEOUT_MS,
   DEFAULT_STOP_TIMEOUT_MS,
   SNAPSHOT_TIMEOUT_GRACE_MS,
+  WORKER_RESTART_INITIAL_MS,
+  WORKER_RESTART_MAX_MS,
   createServerAgentSupervisor
 };
