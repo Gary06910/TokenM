@@ -177,9 +177,10 @@ test('clear waits for in-flight flush and preserves later enqueue ordering', asy
 
 test('v1 migrates, old active notifications expire, and retention removes old failures', async (t) => {
   const filePath = fixture(t);
-  const base = Date.parse(payload().occurredAt);
+  const event = payload();
+  const base = Date.parse(event.occurredAt);
   let now = base + ACTIVE_TTL_MS;
-  fs.writeFileSync(filePath, JSON.stringify({ version: 1, items: [{ payload: payload(), suspended: null }] }));
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, items: [{ payload: event, suspended: null }] }));
   let sends = 0;
   const queue = createAndroidOutbox({ filePath, now: () => now, send: async () => { sends++; } });
   await queue.flush();
