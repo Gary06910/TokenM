@@ -78,6 +78,29 @@ function rootArgs(rootPath, launcher = '/home/user/.local/bin/toknow-agent') {
   return ['--root', rootPath, '--launcher', launcher];
 }
 
+test('service detect CLI emits backend availability and a safe runtime contract', () => {
+  const result = runCli(['service', 'detect']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(report.backends), [
+    'systemd-user',
+    'supervisord',
+    'container-external',
+    'none'
+  ]);
+  assert.equal(['systemd-user', 'supervisord', 'container-external', 'none'].includes(report.recommended), true);
+  assert.equal(report.runtimeContract.command.at(-1), 'run');
+  assert.equal(report.runtimeContract.stopSignal, 'SIGTERM');
+  assert.equal(report.runtimeContract.stopTimeoutSeconds, 15);
+  assert.deepEqual(report.runtimeContract.requiredPersistentRoots, [
+    '~/.config/toknow-agent',
+    '~/.local/share/toknow-agent',
+    '~/.local/state/toknow-agent'
+  ]);
+  assert.doesNotMatch(result.stdout, /Authorization|ownerId|CID|CODEX_HOME|tm_uc_d1\.|KUBERNETES_SERVICE_HOST=/i);
+});
+
 test('hooks status/enable/disable keep trust explicit and preserve profile-local hooks', (t) => {
   const setup = fixture(t);
   const before = runCli(['hooks', 'status', '--profile', 'business', ...rootArgs(setup.rootPath)]);

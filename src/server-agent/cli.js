@@ -9,6 +9,7 @@ const { loadServerAgentConfig, normalizeProfileId } = require('./config');
 const { loadServerCredential } = require('./notificationRuntime');
 const { serverHookCommand, stableLauncherPath } = require('./hooks');
 const { createServerAgentPaths } = require('./paths');
+const { detectServiceEnvironment } = require('./serviceDetection');
 
 function packageJsonPath() {
   return path.join(__dirname, '..', '..', 'package.json');
@@ -143,6 +144,21 @@ async function runHooks(subcommand, args) {
   return writeJson({ profileId: profile.id, configured: false, needsTrust: false });
 }
 
+async function runService(subcommand, args, deps = {}) {
+  if (subcommand !== 'detect') throw commandError('unknown_service_command');
+  const detect = deps.detectServiceEnvironment || detectServiceEnvironment;
+  const report = detect({
+    env: deps.env || process.env,
+    fsApi: deps.fsApi,
+    pathApi: deps.pathApi,
+    platform: deps.platform,
+    commandAvailable: deps.commandAvailable,
+    runCommand: deps.runCommand,
+    supervisorConfig: optionValue(args, 'supervisorConfig', 'supervisor-config')
+  });
+  return writeJson(report);
+}
+
 async function runHookFailOpen(args) {
   try {
     const paths = pathsForArgs(args);
@@ -169,6 +185,7 @@ async function run(argv = process.argv.slice(2), deps = {}) {
   const command = positional[0] || 'run';
   if (command === 'hook') return runHookFailOpen(args);
   if (command === 'hooks') return runHooks(positional[1], args);
+  if (command === 'service') return runService(positional[1], args, deps);
   if (!['run', 'once'].includes(command)) throw commandError('unknown_server_agent_command');
   const paths = pathsForArgs(args);
   const { config } = configForArgs(args, paths);
@@ -216,5 +233,6 @@ module.exports = {
   enabledProfileIds,
   run,
   runHookFailOpen,
-  runHooks
+  runHooks,
+  runService
 };
