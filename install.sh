@@ -16,6 +16,9 @@ fi
 
 PREFIX=
 USER_SERVICE=0
+SERVICE_MANAGER=none
+SERVICE_MANAGER_SET=0
+SUPERVISOR_CONFIG=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --prefix=*) PREFIX=${1#*=}; shift ;;
@@ -27,16 +30,61 @@ while [ "$#" -gt 0 ]; do
       PREFIX=$2
       shift 2
       ;;
+    --service-manager=*)
+      REQUESTED_SERVICE_MANAGER=${1#*=}
+      if [ "$SERVICE_MANAGER_SET" -eq 1 ] && [ "$SERVICE_MANAGER" != "$REQUESTED_SERVICE_MANAGER" ]; then
+        printf '%s\n' 'install.sh: conflicting --service-manager values' >&2
+        exit 2
+      fi
+      SERVICE_MANAGER=$REQUESTED_SERVICE_MANAGER
+      SERVICE_MANAGER_SET=1
+      shift
+      ;;
+    --service-manager)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' 'install.sh: --service-manager requires a value' >&2
+        exit 2
+      fi
+      REQUESTED_SERVICE_MANAGER=$2
+      if [ "$SERVICE_MANAGER_SET" -eq 1 ] && [ "$SERVICE_MANAGER" != "$REQUESTED_SERVICE_MANAGER" ]; then
+        printf '%s\n' 'install.sh: conflicting --service-manager values' >&2
+        exit 2
+      fi
+      SERVICE_MANAGER=$REQUESTED_SERVICE_MANAGER
+      SERVICE_MANAGER_SET=1
+      shift 2
+      ;;
+    --supervisor-config=*)
+      SUPERVISOR_CONFIG=${1#*=}
+      shift
+      ;;
+    --supervisor-config)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' 'install.sh: --supervisor-config requires a path' >&2
+        exit 2
+      fi
+      SUPERVISOR_CONFIG=$2
+      shift 2
+      ;;
     --user-service)
+      if [ "$SERVICE_MANAGER_SET" -eq 1 ] && [ "$SERVICE_MANAGER" != systemd-user ]; then
+        printf '%s\n' 'install.sh: --user-service conflicts with --service-manager' >&2
+        exit 2
+      fi
       USER_SERVICE=1
+      SERVICE_MANAGER=systemd-user
+      SERVICE_MANAGER_SET=1
       shift
       ;;
     --help|-h)
       printf '%s\n' 'Usage: install.sh [--prefix PATH]' \
-        '       install.sh --user-service' \
+        '       install.sh --service-manager systemd-user' \
+        '       install.sh --service-manager supervisord [--supervisor-config PATH]' \
+        '       install.sh --service-manager container-external|none' \
+        '       install.sh --user-service (alias for systemd-user)' \
         'Default: ~/.local/share/toknow-agent/<VERSION> with ~/.local/bin/toknow-agent' \
         'Override: TO_KNOW_INSTALL_ROOT or --prefix PATH' \
-        'User service: default install root only; requires systemctl --user'
+        'No service manager is selected by a plain install.'
       exit 0
       ;;
     *)
@@ -45,6 +93,24 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$USER_SERVICE" -eq 1 ] && [ "$SERVICE_MANAGER" != systemd-user ]; then
+  printf '%s\n' 'install.sh: --user-service conflicts with --service-manager' >&2
+  exit 2
+fi
+
+case "$SERVICE_MANAGER" in
+  systemd-user|supervisord|container-external|none) ;;
+  *)
+    printf 'install.sh: unsupported service manager: %s\n' "$SERVICE_MANAGER" >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$SUPERVISOR_CONFIG" ] && [ "$SERVICE_MANAGER" != supervisord ]; then
+  printf '%s\n' 'install.sh: --supervisor-config requires --service-manager supervisord' >&2
+  exit 2
+fi
 
 if [ -n "${TO_KNOW_INSTALL_ROOT:-}" ]; then
   if [ -n "$PREFIX" ] && [ "$PREFIX" != "$TO_KNOW_INSTALL_ROOT" ]; then
@@ -61,7 +127,23 @@ else
   STABLE_BIN="$PREFIX/bin/toknow-agent"
 fi
 
-if [ "$USER_SERVICE" -eq 1 ]; then
+if [ "$SERVICE_MANAGER" = supervisord ]; then
+  SERVICE_HELPER="$PACKAGE_ROOT/app/src/server-agent/serviceInstaller.js"
+  TEMPLATE="$PACKAGE_ROOT/supervisord/toknow-agent.conf.template"
+  BUNDLED_NODE="$PACKAGE_ROOT/runtime/node/bin/node"
+  if [ ! -f "$SERVICE_HELPER" ] || [ ! -f "$TEMPLATE" ] || [ ! -x "$BUNDLED_NODE" ]; then
+    printf '%s\n' 'install.sh: packaged supervisord backend assets are incomplete' >&2
+    exit 1
+  fi
+  set -- validate --service-manager supervisord --launcher "$STABLE_BIN" --template "$TEMPLATE"
+  if [ -n "$SUPERVISOR_CONFIG" ]; then
+    set -- "$@" --supervisor-config "$SUPERVISOR_CONFIG"
+  fi
+  "$BUNDLED_NODE" "$SERVICE_HELPER" "$@"
+fi
+
+if [ "$SERVICE_MANAGER" = systemd-user ]; then
+  USER_SERVICE=1
   DEFAULT_PREFIX="$HOME/.local/share/toknow-agent"
   if [ "$PREFIX" != "$DEFAULT_PREFIX" ]; then
     printf '%s\n' 'install.sh: --user-service requires the default install root ~/.local/share/toknow-agent' >&2
@@ -112,4 +194,26 @@ if [ "$USER_SERVICE" -eq 1 ]; then
     exit 1
   fi
   printf 'User service enabled: %s\n' "$UNIT_PATH"
+elif [ "$SERVICE_MANAGER" = supervisord ]; then
+  SERVICE_HELPER="$VERSION_ROOT/app/src/server-agent/serviceInstaller.js"
+  TEMPLATE="$PACKAGE_ROOT/supervisord/toknow-agent.conf.template"
+  BUNDLED_NODE="$VERSION_ROOT/runtime/node/bin/node"
+  if [ ! -f "$SERVICE_HELPER" ] || [ ! -f "$TEMPLATE" ] || [ ! -x "$BUNDLED_NODE" ]; then
+    printf '%s\n' 'install.sh: packaged supervisord backend assets are incomplete' >&2
+    exit 1
+  fi
+  set -- install --service-manager supervisord --launcher "$STABLE_BIN" --template "$TEMPLATE"
+  if [ -n "$SUPERVISOR_CONFIG" ]; then
+    set -- "$@" --supervisor-config "$SUPERVISOR_CONFIG"
+  fi
+  "$BUNDLED_NODE" "$SERVICE_HELPER" "$@"
+elif [ "$SERVICE_MANAGER" = container-external ]; then
+  printf '%s\n' 'Service backend: container-external' \
+    "Command: $STABLE_BIN run" \
+    'Stop signal: SIGTERM' \
+    'Stop timeout: 15s' \
+    'Restart policy: always or on-failure (configure in the external orchestrator)' \
+    "Persistent config: ${XDG_CONFIG_HOME:-$HOME/.config}/toknow-agent" \
+    "Persistent runtime data: ${XDG_DATA_HOME:-$HOME/.local/share}/toknow-agent" \
+    "Persistent state: ${XDG_STATE_HOME:-$HOME/.local/state}/toknow-agent"
 fi

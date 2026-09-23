@@ -217,11 +217,24 @@ async function packageLinuxX64({
     path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'remove-user-service.sh'),
     path.join(packageRoot, 'systemd', 'remove-user-service.sh')
   );
+  copyFile(
+    path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'supervisord', 'toknow-agent.conf.template'),
+    path.join(packageRoot, 'supervisord', 'toknow-agent.conf.template')
+  );
+  copyFile(
+    path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'supervisord', 'remove-service.sh'),
+    path.join(packageRoot, 'supervisord', 'remove-service.sh')
+  );
+  copyFile(
+    path.join(root, SERVER_AGENT_SERVICE_SOURCE_DIR, 'container', 'README.md'),
+    path.join(packageRoot, 'container', 'README.md')
+  );
   fs.writeFileSync(path.join(packageRoot, 'VERSION'), `${rootPackage.version}\n`, 'utf8');
   fs.writeFileSync(path.join(runtimeRoot, 'manifest.json'), `${JSON.stringify(runtimeManifest, null, 2)}\n`, 'utf8');
   fs.chmodSync(path.join(packageRoot, 'bin', 'toknow-agent'), 0o755);
   fs.chmodSync(path.join(packageRoot, 'install.sh'), 0o755);
   fs.chmodSync(path.join(packageRoot, 'systemd', 'remove-user-service.sh'), 0o755);
+  fs.chmodSync(path.join(packageRoot, 'supervisord', 'remove-service.sh'), 0o755);
 
   const nodeRuntime = await fetchRuntime({ manifest: runtimeManifest });
   assertBundledNode(nodeRuntime.nodeRoot, runtimeManifest.nodeVersion, spawn);

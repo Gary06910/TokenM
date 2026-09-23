@@ -13,6 +13,9 @@ const launcherPath = path.join(root, 'bin', 'toknow-agent');
 const installPath = path.join(root, 'install.sh');
 const serviceSourcePath = path.join(root, 'packaging', 'server-agent', 'toknow-agent.service');
 const serviceRemovalSourcePath = path.join(root, 'packaging', 'server-agent', 'remove-user-service.sh');
+const supervisorTemplatePath = path.join(root, 'packaging', 'server-agent', 'supervisord', 'toknow-agent.conf.template');
+const supervisorRemovalPath = path.join(root, 'packaging', 'server-agent', 'supervisord', 'remove-service.sh');
+const containerReadmePath = path.join(root, 'packaging', 'server-agent', 'container', 'README.md');
 const packageScriptPath = path.join(root, 'scripts', 'server-agent', 'package-linux-x64.js');
 const runtime = require('../../scripts/server-agent/fetch-node-runtime');
 const packageScript = require('../../scripts/server-agent/package-linux-x64');
@@ -30,6 +33,11 @@ function createVerifierFixture({ omitNodeModules = false } = {}) {
   fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'server-agent'), { recursive: true });
   fs.mkdirSync(path.join(packageRoot, 'app', 'src', 'shared'), { recursive: true });
   fs.mkdirSync(path.join(packageRoot, 'systemd'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'supervisord'), { recursive: true });
+  fs.mkdirSync(path.join(packageRoot, 'container'), { recursive: true });
+  for (const file of ['serviceDetection.js', 'serviceInstaller.js']) {
+    fs.copyFileSync(path.join(root, 'src', 'server-agent', file), path.join(packageRoot, 'app', 'src', 'server-agent', file));
+  }
   if (!omitNodeModules) fs.mkdirSync(path.join(packageRoot, 'app', 'node_modules'), { recursive: true });
   fs.writeFileSync(path.join(packageRoot, 'bin', 'toknow-agent'), read(launcherPath), 'utf8');
   fs.writeFileSync(path.join(packageRoot, 'install.sh'), read(installPath), 'utf8');
@@ -40,6 +48,9 @@ function createVerifierFixture({ omitNodeModules = false } = {}) {
   fs.writeFileSync(path.join(packageRoot, 'app', 'LICENSE'), read(path.join(root, 'LICENSE')), 'utf8');
   fs.copyFileSync(serviceSourcePath, path.join(packageRoot, 'systemd', 'toknow-agent.service'));
   fs.copyFileSync(serviceRemovalSourcePath, path.join(packageRoot, 'systemd', 'remove-user-service.sh'));
+  fs.copyFileSync(supervisorTemplatePath, path.join(packageRoot, 'supervisord', 'toknow-agent.conf.template'));
+  fs.copyFileSync(supervisorRemovalPath, path.join(packageRoot, 'supervisord', 'remove-service.sh'));
+  fs.copyFileSync(containerReadmePath, path.join(packageRoot, 'container', 'README.md'));
   return { packageRoot, manifest };
 }
 
@@ -117,6 +128,8 @@ test('install script supports a user prefix override and never touches user stat
   assert.match(install, /TO_KNOW_INSTALL_ROOT/);
   assert.match(install, /--prefix/);
   assert.match(install, /--user-service/);
+  assert.match(install, /--service-manager supervisord/);
+  assert.match(install, /--supervisor-config/);
   assert.match(install, /\$HOME\/\.local\/share\/toknow-agent/);
   assert.match(install, /\$HOME\/\.local\/bin\/toknow-agent/);
   assert.doesNotMatch(install, /\bsudo\b|\/usr\/local|\/etc\/systemd\/system|loginctl\s+enable-linger/i);
@@ -153,11 +166,27 @@ test('Linux package source includes the systemd user-service assets', () => {
   assert.equal(packageScript.SERVER_AGENT_SERVICE_SOURCE_DIR, path.join('packaging', 'server-agent'));
   assert.ok(source.includes("toknow-agent.service"));
   assert.ok(source.includes("remove-user-service.sh"));
-  assert.deepEqual(packageVerifier.REQUIRED_PATHS.slice(-3), [
-    'systemd/toknow-agent.service',
-    'systemd/remove-user-service.sh',
+  assert.ok(source.includes("toknow-agent.conf.template"));
+  assert.ok(source.includes("'container', 'README.md'"));
+  assert.deepEqual(packageVerifier.REQUIRED_PATHS.slice(-4), [
+    'supervisord/toknow-agent.conf.template',
+    'supervisord/remove-service.sh',
+    'container/README.md',
     'VERSION'
   ]);
+});
+
+test('supervisord package asset declares a stable launcher and scoped lifecycle policy', () => {
+  const template = read(supervisorTemplatePath);
+  assert.match(template, /^\[program:toknow-agent\]$/m);
+  assert.match(template, /^command=@STABLE_LAUNCHER@ run$/m);
+  assert.match(template, /^autostart=true$/m);
+  assert.match(template, /^autorestart=true$/m);
+  assert.match(template, /^stopsignal=TERM$/m);
+  assert.match(template, /^stopwaitsecs=15$/m);
+  assert.match(template, /^stopasgroup=true$/m);
+  assert.match(template, /^killasgroup=true$/m);
+  assert.doesNotMatch(template, /\/home\/user|1\.0\.0/);
 });
 
 test('package copy policy preserves symlink text and never dereferences', () => {

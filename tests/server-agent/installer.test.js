@@ -89,9 +89,43 @@ test('plain install does not call systemctl or enable a service', () => {
   assert.equal(fs.existsSync(path.join(fixture.home, '.local', 'bin', 'toknow-agent')), true);
 });
 
+test('--service-manager container-external installs the launcher and prints its runtime contract', () => {
+  const fixture = createFixture();
+  const result = runInstall(fixture, ['--service-manager', 'container-external']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Service backend: container-external/);
+  assert.match(result.stdout, /toknow-agent run/);
+  assert.match(result.stdout, /SIGTERM/);
+  assert.match(result.stdout, /15s/);
+  assert.match(result.stdout, /Persistent config:/);
+  assert.match(result.stdout, /Persistent runtime data:/);
+  assert.deepEqual(systemctlCalls(fixture), []);
+  assert.equal(fs.existsSync(unitPath(fixture)), false);
+});
+
+test('unsupported service manager fails before runtime installation', () => {
+  const fixture = createFixture();
+  const result = runInstall(fixture, ['--service-manager', 'openrc']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsupported service manager/i);
+  assert.equal(fs.existsSync(path.join(fixture.home, '.local', 'bin', 'toknow-agent')), false);
+  assert.deepEqual(systemctlCalls(fixture), []);
+});
+
 test('--user-service installs the unit, reloads the user manager, and enables now', () => {
   const fixture = createFixture();
   const result = runInstall(fixture, ['--user-service']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(unitPath(fixture), 'utf8'), fs.readFileSync(serviceSource, 'utf8'));
+  assert.deepEqual(systemctlCalls(fixture), [
+    '--user daemon-reload',
+    '--user enable --now toknow-agent.service'
+  ]);
+});
+
+test('--service-manager systemd-user preserves the existing unit contract', () => {
+  const fixture = createFixture();
+  const result = runInstall(fixture, ['--service-manager', 'systemd-user']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(unitPath(fixture), 'utf8'), fs.readFileSync(serviceSource, 'utf8'));
   assert.deepEqual(systemctlCalls(fixture), [

@@ -1,0 +1,12 @@
+; Managed by To Know Server Agent installer.
+[program:toknow-agent]
+command=@STABLE_LAUNCHER@ run
+autostart=true
+autorestart=true
+startsecs=3
+startretries=10
+stopsignal=TERM
+stopwaitsecs=15
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true

@@ -10,12 +10,17 @@ const REQUIRED_PATHS = Object.freeze([
   'runtime/manifest.json',
   'runtime/node/bin/node',
   'app/src/server-agent',
+  'app/src/server-agent/serviceDetection.js',
+  'app/src/server-agent/serviceInstaller.js',
   'app/src/shared',
   'app/node_modules',
   'app/package.json',
   'app/LICENSE',
   'systemd/toknow-agent.service',
   'systemd/remove-user-service.sh',
+  'supervisord/toknow-agent.conf.template',
+  'supervisord/remove-service.sh',
+  'container/README.md',
   'VERSION'
 ]);
 
@@ -133,6 +138,11 @@ function verifyInstallScript(packageRoot, errors) {
   if (!script.includes('USER_SERVICE') || !script.includes('USER_SERVICE" -eq 1')) {
     errors.push('install.sh does not keep service installation behind an explicit option');
   }
+  if (!script.includes('--service-manager')
+    || !script.includes('systemd-user|supervisord|container-external|none')
+    || !script.includes('--supervisor-config')) {
+    errors.push('install.sh does not expose the explicit supported service-manager options');
+  }
 }
 
 function verifyServiceUnit(packageRoot, errors) {
@@ -179,6 +189,55 @@ function verifyUserServiceHelper(packageRoot, errors) {
   }
 }
 
+function verifySupervisordAssets(packageRoot, errors) {
+  const templatePath = path.join(packageRoot, 'supervisord', 'toknow-agent.conf.template');
+  if (pathExists(packageRoot, 'supervisord/toknow-agent.conf.template')) {
+    const template = readText(templatePath);
+    const requiredLines = [
+      ['managed marker', /^; Managed by To Know Server Agent installer\.$/m],
+      ['program name', /^\[program:toknow-agent\]$/m],
+      ['stable launcher placeholder', /^command=@STABLE_LAUNCHER@ run$/m],
+      ['autostart', /^autostart=true$/m],
+      ['autorestart', /^autorestart=true$/m],
+      ['startsecs', /^startsecs=3$/m],
+      ['startretries', /^startretries=10$/m],
+      ['TERM stop signal', /^stopsignal=TERM$/m],
+      ['stop timeout', /^stopwaitsecs=15$/m],
+      ['stop process group', /^stopasgroup=true$/m],
+      ['kill process group', /^killasgroup=true$/m],
+      ['stderr redirection', /^redirect_stderr=true$/m]
+    ];
+    for (const [label, pattern] of requiredLines) {
+      if (!pattern.test(template)) errors.push(`supervisord template is missing ${label}`);
+    }
+    if (/\/home\/user|(?:^|\/)\d+\.\d+\.\d+(?:\/|$)/.test(template)) {
+      errors.push('supervisord template contains a home or version-specific launcher path');
+    }
+  }
+
+  const helperPath = path.join(packageRoot, 'supervisord', 'remove-service.sh');
+  if (pathExists(packageRoot, 'supervisord/remove-service.sh')) {
+    const helper = readText(helperPath);
+    if (!helper.includes('serviceInstaller.js') || !helper.includes('remove --service-manager supervisord')) {
+      errors.push('supervisord removal helper does not invoke the safe managed removal path');
+    }
+    if (helper.includes('SIGHUP') || /killall|pkill|\bkill\b/.test(helper)) {
+      errors.push('supervisord removal helper may signal unrelated processes');
+    }
+  }
+
+  const containerDocPath = path.join(packageRoot, 'container', 'README.md');
+  if (pathExists(packageRoot, 'container/README.md')) {
+    const containerDoc = readText(containerDocPath);
+    for (const phrase of ['container-external', 'SIGTERM', '15 seconds', 'Kubernetes Deployment', 'cannot guarantee']) {
+      if (!containerDoc.includes(phrase)) errors.push(`container deployment documentation is missing ${phrase}`);
+    }
+    for (const relative of ['~/.config/toknow-agent', '~/.local/share/toknow-agent', '~/.local/state/toknow-agent']) {
+      if (!containerDoc.includes(relative)) errors.push(`container deployment documentation is missing persistent root ${relative}`);
+    }
+  }
+}
+
 function verifyPackage(packageRoot, options = {}) {
   const root = path.resolve(packageRoot);
   const errors = [];
@@ -205,6 +264,7 @@ function verifyPackage(packageRoot, options = {}) {
   if (pathExists(root, 'install.sh')) verifyInstallScript(root, errors);
   verifyServiceUnit(root, errors);
   verifyUserServiceHelper(root, errors);
+  verifySupervisordAssets(root, errors);
 
   let packageJson;
   let runtimeManifest;
@@ -265,5 +325,6 @@ module.exports = {
   PackageVerificationError,
   REQUIRED_PATHS,
   forbiddenReason,
+  verifySupervisordAssets,
   verifyPackage
 };
